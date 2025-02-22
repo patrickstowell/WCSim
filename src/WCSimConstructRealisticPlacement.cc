@@ -669,9 +669,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     multipmt_central_rotation->rotateZ(270*deg);
 
     // For the OD PMT we instead need to make it face outwards from the white tyvek in the OD.
-    G4ThreeVector odpmt_central_position = G4ThreeVector(config.WhiteTyvekOuterRadius+2*cm,0.0,0.0);
+    G4ThreeVector odpmt_central_position = G4ThreeVector(config.WhiteTyvekOuterRadius+1*mm,0.0,0.0);
     G4RotationMatrix* pmtod_central_rotation = new G4RotationMatrix;
-    pmtod_central_rotation->rotateY(270*deg);
+    pmtod_central_rotation->rotateY(90*deg);
 
     auto pmt20_offset_placement = new G4AssemblyVolume();
     pmt20_offset_placement->AddPlacedVolume(pmt20_dummy_logic, pmt_central_position, pmt_central_rotation);
@@ -1007,6 +1007,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
 
     G4ThreeVector topcapposod = G4ThreeVector(0.0,0.0,config.WhiteTyvekBarrelLength/2);
     G4RotationMatrix* topcaprotod = new G4RotationMatrix();
+    topcaprotod->rotateX(180*deg);
     endcap_assembly_od->MakeImprint( OuterDetectorLogic, topcapposod, topcaprotod);
 
     int pmt20_count_barrel_and_top    = CountLogicalChildren(InnerDetectorLogic, pmt20_dummy_logic);
@@ -1026,7 +1027,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
 
     G4ThreeVector botcapposod = G4ThreeVector(0.0,0.0,-config.WhiteTyvekBarrelLength/2);
     G4RotationMatrix* botcaprotod = new G4RotationMatrix();
-    botcaprotod->rotateX(180*deg);
+    // botcaprotod->rotateX(180*deg);
+    botcaprotod->rotateX(180*deg+180*deg); 
     endcap_assembly_od->MakeImprint( OuterDetectorLogic, botcapposod, botcaprotod);
 
     // Do some final sumation
@@ -1198,7 +1200,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     // Reapeat the re-placement for the OD
     logicWCODWLSAndPMT = ConstructPMTAndWLSPlate(WCPMTODName, WCODCollectionName, "OD");
 
-    logicWCODWLSAndPMT->SetVisAttributes(pmtmulti_dummy_colour);        
+    // logicWCODWLSAndPMT->SetVisAttributes(pmtmulti_dummy_colour);        
+    SetNestedVisAttributes(logicWCODWLSAndPMT, invisible);
+    logicWCODWLSAndPMT->SetVisAttributes(pmtmulti_dummy_colour);
 
     copyno = 0;
     removed = 0;
