@@ -376,9 +376,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     config.DeadSpaceBarrelLength = config.BlackTyvekBarrelLength + 2*WCODDeadSpace;
 
     config.WhiteTyvekVis = new G4VisAttributes(true, G4Colour(1.0,1.0,1.0,1.0)); //WHITE
-    config.WhiteTyvekVis->SetForceSolid(1);
+    config.WhiteTyvekVis->SetForceSolid(0);
     config.WhiteTyvekVis->SetLineWidth(2);
-    config.WhiteTyvekVis->SetForceAuxEdgeVisible(0);
+    config.WhiteTyvekVis->SetForceAuxEdgeVisible(1);
     config.WhiteTyvekMaterial = G4Material::GetMaterial("Tyvek");
     config.WhiteTyvekInnerRadius = config.DeadSpaceOuterRadius;
     config.WhiteTyvekOuterRadius = config.DeadSpaceOuterRadius + WCODTyvekSheetThickness;
@@ -478,7 +478,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
       WallTyvekPhysical
     );
 
-    // 4. OuterDetectr
+    // TODO WALL Tyvevk Rings and TOPCAPS
+
+    // 4. OuterDetector
     G4LogicalVolume* OuterDetectorLogic;
     G4PVPlacement* OuterDetectorPhysical;
     BuildAndPlace_SinglePolyhedraTank(
@@ -494,21 +496,132 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
       OuterDetectorPhysical
     );
 
+    // Nested structure means we should just need one skinsurfaces for all the tyveks.
+    new G4LogicalSkinSurface("WallTyvekSurface",WallTyvekLogic,OpWaterTySurface);
+  
+    new G4LogicalBorderSurface("WaterBSBarrelCellSurface3",
+                OuterDetectorPhysical,
+                WallTyvekPhysical,
+                OpWaterTySurface);
+
+    // 5. White Tyvek Rings
+    // Build Variable Tyvek Rings
+    // OD is built from starting tyvek made of thin layer, then
+    // we add extra tyvek 'rings' up the barrel.
+    // The top Tyvek layer is WhiteTyvekOuterRadius-0.050*mm
+    // The underlayer is WhiteTyvekOuterRadius.
+    for (int i = 0; i < 24; i++) {
+      G4LogicalVolume* WhiteTyvekRingLogic;
+      G4PVPlacement* WhiteTyvekRingPhysical;
+
+      G4double zloc = (-(config.WhiteTyvekBarrelLength/2) +
+        config.WhiteTyvekBarrelLength/24/2 +
+        i*config.WhiteTyvekBarrelLength/24);
+
+      G4ThreeVector RING_POS = G4ThreeVector(0, 0, zloc);
+
+      // Placeholder to allow ring by ring material changes
+      G4Material* ring_material = config.WhiteTyvekMaterial;
+
+      BuildAndPlace_SinglePolyhedraTank(
+        Form("WhiteTyvekRing_%d", i),
+        config.WhiteTyvekOuterRadius-0.050*mm,
+        config.WhiteTyvekOuterRadius,
+        config.WhiteTyvekBarrelLength/24,
+        ring_material,
+        RING_POS,
+        OuterDetectorLogic,
+        config.WhiteTyvekVis,
+        WhiteTyvekRingLogic,
+        WhiteTyvekRingPhysical);
+
+      new G4LogicalSkinSurface(Form("WhiteTyvekRingSurface1_%d", i),
+        WhiteTyvekRingLogic, OpWaterTySurface);
+
+      new G4LogicalBorderSurface(Form("WhiteTyvekRingSurface2_%d", i),
+                  OuterDetectorPhysical,
+                  WhiteTyvekRingPhysical,
+                  OpWaterTySurface);
+    }
+
+    // 5. WhiteTyvekEndCaps
+    G4LogicalVolume* WhiteTyvekTopCapLogic;
+    G4PVPlacement* WhiteTyvekTopCapPhysical;
+
+    G4LogicalVolume* WhiteTyvekBotCapLogic;
+    G4PVPlacement* WhiteTyvekBotCapPhysical;
+
+    G4double zloc = (config.WhiteTyvekBarrelLength/2) + 0.050*mm/2;
+
+    G4ThreeVector TOPCAP_POS = G4ThreeVector(0, 0, zloc);
+    G4ThreeVector BOTCAP_POS = G4ThreeVector(0, 0, -zloc);
+
+    // Placeholder to allow ring by ring material changes
+    G4Material* topcap_material = config.WhiteTyvekMaterial;
+    G4Material* botcap_material = config.WhiteTyvekMaterial;
+
+    BuildAndPlace_SinglePolyhedraTank(
+        "WhiteTyvekTopCap",
+        0,
+        config.WhiteTyvekOuterRadius,
+        0.050*mm,
+        topcap_material,
+        TOPCAP_POS,
+        OuterDetectorLogic,
+        config.WhiteTyvekVis,
+        WhiteTyvekTopCapLogic,
+        WhiteTyvekTopCapPhysical);
+
+    new G4LogicalSkinSurface("WhiteTyvekTopCapSurface1",
+        WhiteTyvekTopCapLogic, OpWaterTySurface);
+
+    new G4LogicalBorderSurface("WhiteTyvekTopCapSurface2",
+                OuterDetectorPhysical,
+                WhiteTyvekTopCapPhysical,
+                OpWaterTySurface);
+
+    BuildAndPlace_SinglePolyhedraTank(
+        "WhiteTyvekBotCap",
+        0,
+        config.WhiteTyvekOuterRadius-0.050*mm,
+        0.050*mm,
+        botcap_material,
+        BOTCAP_POS,
+        OuterDetectorLogic,
+        config.WhiteTyvekVis,
+        WhiteTyvekBotCapLogic,
+        WhiteTyvekBotCapPhysical);
+
+    new G4LogicalSkinSurface("WhiteTyvekBotCapSurface1",
+        WhiteTyvekBotCapLogic, OpWaterTySurface);
+
+    new G4LogicalBorderSurface("WhiteTyvekBotCapSurface2",
+                OuterDetectorPhysical,
+                WhiteTyvekBotCapPhysical,
+                OpWaterTySurface);
+
     // 5. WhiteTyvek
     G4LogicalVolume* WhiteTyvekLogic;
     G4PVPlacement* WhiteTyvekPhysical;
     BuildAndPlace_SinglePolyhedraTank(
       "WhiteTyvek",
       0.0,
-      config.WhiteTyvekOuterRadius,
-      config.WhiteTyvekBarrelLength,
+      config.WhiteTyvekOuterRadius-0.050*mm,
+      config.WhiteTyvekBarrelLength-2*0.050*mm,
       config.WhiteTyvekMaterial,
       CENTRAL_POS,
       OuterDetectorLogic,
       config.WhiteTyvekVis,
       WhiteTyvekLogic,
-      WhiteTyvekPhysical
-    );
+      WhiteTyvekPhysical);
+
+    new G4LogicalSkinSurface("WhiteTyvekSurface",WhiteTyvekLogic,OpWaterTySurface);
+    
+    new G4LogicalBorderSurface("WaterBSBarrelCellSurface2",
+                OuterDetectorPhysical,
+                WhiteTyvekPhysical, 
+                OpWaterTySurface);
+
 
     // 6. Dead Space
     G4LogicalVolume* DeadSpaceLogic;
@@ -558,6 +671,15 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
       InnerDetectorLogic,
       InnerDetectorPhysical
     );
+
+    // Optical Properties
+    new G4LogicalSkinSurface("BlackTyvekSurface",BlackTyvekLogic,OpWaterBSSurface);
+
+    new G4LogicalBorderSurface("WaterBSBarrelCellSurface",
+                InnerDetectorPhysical,
+                BlackTyvekPhysical, 
+                OpWaterBSSurface);
+
 
     // Optional inner phantom for creating a new logical away from the PMT tracking one
     // Currently the entire ID is treated as one volume. This slows tracking down
@@ -669,7 +791,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     multipmt_central_rotation->rotateZ(270*deg);
 
     // For the OD PMT we instead need to make it face outwards from the white tyvek in the OD.
-    G4ThreeVector odpmt_central_position = G4ThreeVector(config.WhiteTyvekOuterRadius+1*mm,0.0,0.0);
+    // PS 02/2025: Adjusted by 2.5mm to remove overlap.
+    G4ThreeVector odpmt_central_position = G4ThreeVector(config.WhiteTyvekOuterRadius+3.5*mm,0.0,0.0);
     G4RotationMatrix* pmtod_central_rotation = new G4RotationMatrix;
     pmtod_central_rotation->rotateY(90*deg);
 
@@ -1082,26 +1205,26 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     invisible->SetForceAuxEdgeVisible(0);
 
     G4VisAttributes* colored= new G4VisAttributes(G4Colour(0.0,1.0,0.0));
-    colored->SetForceLineSegmentsPerCircle(24);
-    colored->SetForceAuxEdgeVisible(0);
-    colored->SetForceWireframe(1);
+    // colored->SetForceLineSegmentsPerCircle(24);
+    colored->SetForceAuxEdgeVisible(1);
+    // colored->SetForceWireframe(1);
     colored->SetVisibility(1);
-    colored->SetForceAuxEdgeVisible(0);
+    colored->SetForceAuxEdgeVisible(1);
     colored->SetDaughtersInvisible(1);
 
-    G4VisAttributes* colored2= new G4VisAttributes(G4Colour(1.0,0.0,0.0));
-    colored2->SetForceLineSegmentsPerCircle(24);
-    colored2->SetForceAuxEdgeVisible(0);
+    G4VisAttributes* colored2= new G4VisAttributes(G4Colour(0.0,0.0,1.0));
+    // colored2->SetForceLineSegmentsPerCircle(24);
+    colored2->SetForceAuxEdgeVisible(1);
     colored2->SetForceWireframe(1);
     colored2->SetVisibility(1);
-    colored2->SetForceAuxEdgeVisible(0);
+    colored2->SetForceAuxEdgeVisible(1);
     colored2->SetDaughtersInvisible(1);
 
-    // SetNestedVisAttributes(logicWCPMT, invisible );
-    // SetNestedVisAttributes(logicWCPMT2, invisible );
+    SetNestedVisAttributes(logicWCPMT, invisible );
+    SetNestedVisAttributes(logicWCPMT2, invisible );
 
-    logicWCPMT->SetVisAttributes(invisible);     
-    logicWCPMT2->SetVisAttributes(invisible);  
+    logicWCPMT->GetDaughter(0)->GetLogicalVolume()->SetVisAttributes(colored);
+    logicWCPMT2->GetDaughter(0)->GetLogicalVolume()->SetVisAttributes(colored2);
 
     // -------------------------------------
     // ID PMT Placement
@@ -1245,25 +1368,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     // we only have three surfaces to add to make sure light 
     // propogation is handled correctly.
     
-    // Nested structure means we should just need one skinsurfaces for all the tyveks.
-    new G4LogicalSkinSurface("WallTyvekSurface",WallTyvekLogic,OpWaterTySurface);
-    new G4LogicalSkinSurface("WhiteTyvekSurface",WhiteTyvekLogic,OpWaterTySurface);
-    new G4LogicalSkinSurface("BlackTyvekSurface",BlackTyvekLogic,OpWaterBSSurface);
-
-    new G4LogicalBorderSurface("WaterBSBarrelCellSurface",
-                InnerDetectorPhysical,
-                BlackTyvekPhysical, 
-                OpWaterBSSurface);
-
-    new G4LogicalBorderSurface("WaterBSBarrelCellSurface2",
-                OuterDetectorPhysical,
-                WhiteTyvekPhysical, 
-                OpWaterTySurface);
-
-    new G4LogicalBorderSurface("WaterBSBarrelCellSurface3",
-                OuterDetectorPhysical,
-                WallTyvekPhysical, 
-                OpWaterTySurface);
+    // PS. 02/2025. Previously optical surfaces were here, but instead they've been moved to just
+    // after the logicals are created so boundaries are clear.
     
     int pmt20_count_final    = CountLogicalChildren(InnerDetectorLogic, pmt20_dummy_logic);
     int pmtmulti_count_final = CountLogicalChildren(InnerDetectorLogic, pmtmulti_dummy_logic);
