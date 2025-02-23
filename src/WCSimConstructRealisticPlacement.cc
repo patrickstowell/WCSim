@@ -390,10 +390,10 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     config.OuterDetectorOuterRadius = config.WhiteTyvekOuterRadius + WCODLateralWaterDepth;
     config.OuterDetectorBarrelLength = config.WhiteTyvekBarrelLength + 2*WCODHeightWaterDepth;
 
-    config.WallTyvekVis = new G4VisAttributes(false, G4Colour(1.0,0.0,0.0,1.0)); // RED
+    config.WallTyvekVis = new G4VisAttributes(true, G4Colour(1.0,1.0,1.0,1.0)); // White
     config.WallTyvekVis->SetForceWireframe(1);
-    config.WallTyvekVis->SetLineWidth(0);
-    config.WallTyvekVis->SetForceAuxEdgeVisible(0);
+    config.WallTyvekVis->SetLineWidth(1);
+    config.WallTyvekVis->SetForceAuxEdgeVisible(1);
     config.WallTyvekMaterial = G4Material::GetMaterial("Tyvek");
     config.WallTyvekInnerRadius = config.OuterDetectorOuterRadius;
     config.WallTyvekOuterRadius = config.OuterDetectorOuterRadius + WCODTyvekSheetThickness;
@@ -1323,9 +1323,19 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     // Reapeat the re-placement for the OD
     logicWCODWLSAndPMT = ConstructPMTAndWLSPlate(WCPMTODName, WCODCollectionName, "OD");
 
+    G4VisAttributes* colored3= new G4VisAttributes(G4Colour(1.0,0.0,0.0));
+    // colored2->SetForceLineSegmentsPerCircle(24);
+    colored3->SetForceAuxEdgeVisible(1);
+    colored3->SetForceWireframe(1);
+    colored3->SetVisibility(1);
+    colored3->SetForceAuxEdgeVisible(1);
+    colored3->SetDaughtersInvisible(1);
+
     // logicWCODWLSAndPMT->SetVisAttributes(pmtmulti_dummy_colour);        
     SetNestedVisAttributes(logicWCODWLSAndPMT, invisible);
-    logicWCODWLSAndPMT->SetVisAttributes(pmtmulti_dummy_colour);
+    for (int i = 0; i < logicWCODWLSAndPMT->GetNoDaughters(); i++){
+      logicWCODWLSAndPMT->GetDaughter(i)->GetLogicalVolume()->SetVisAttributes(colored3);
+    }
 
     copyno = 0;
     removed = 0;
