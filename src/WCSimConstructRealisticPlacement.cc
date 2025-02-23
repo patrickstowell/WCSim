@@ -357,15 +357,15 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     config.InnerDetectorVis->SetForceSolid(1);
     config.InnerDetectorMaterial = G4Material::GetMaterial("Water");
     config.InnerDetectorInnerRadius = 0;
-    config.InnerDetectorOuterRadius = WCIDRadius;
+    config.InnerDetectorOuterRadius = WCIDRadius-59.62*mm+0.5*mm;
     config.InnerDetectorBarrelLength = WCIDHeight;
 
     config.BlackTyvekVis = new G4VisAttributes(true, G4Colour(0.0,1.0,0.0,1.0)); //GREEN
     config.BlackTyvekVis->SetLineWidth(2);
     config.BlackTyvekVis->SetForceAuxEdgeVisible(0);
     config.BlackTyvekMaterial = G4Material::GetMaterial("Tyvek");
-    config.BlackTyvekInnerRadius = WCIDRadius;
-    config.BlackTyvekOuterRadius = WCIDRadius + WCBlackSheetThickness;
+    config.BlackTyvekInnerRadius = WCIDRadius -59.62*mm+0.5*mm;
+    config.BlackTyvekOuterRadius = WCIDRadius -59.62*mm+0.5*mm + WCBlackSheetThickness;
     config.BlackTyvekBarrelLength = WCIDHeight + 2*WCBlackSheetThickness;
 
     config.DeadSpaceVis = new G4VisAttributes(true, G4Colour(0.0,0.0,0.0,1.0)); //BLACK
@@ -777,10 +777,10 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     // Since assembly volumes just expand relative to their center point the means
     // all nested volumes will also have the PMT againt the tyvek.
 
-    // G4ThreeVector pmt_central_position = G4ThreeVector(config.InnerDetectorOuterRadius-59.62*mm,0.0,0.0);
-    // G4ThreeVector mpmt_central_position = G4ThreeVector(config.InnerDetectorOuterRadius-59.62*mm,0.0,0.0);
-    G4ThreeVector pmt_central_position = G4ThreeVector(config.InnerDetectorOuterRadius-0.5*mm,0.0,0.0);
+    G4ThreeVector pmt_central_position = G4ThreeVector(config.InnerDetectorOuterRadius-0.5*mms,0.0,0.0);
     G4ThreeVector mpmt_central_position = G4ThreeVector(config.InnerDetectorOuterRadius-0.5*mm,0.0,0.0);
+    // G4ThreeVector pmt_central_position = G4ThreeVector(config.InnerDetectorOuterRadius-0.5*mm,0.0,0.0);
+    // G4ThreeVector mpmt_central_position = G4ThreeVector(config.InnerDetectorOuterRadius-0.5*mm,0.0,0.0);
     G4ThreeVector pmt_central_offset = G4ThreeVector(0.0,0.0,0.0); // -> Can be used for relative offset!
     G4RotationMatrix* pmt_central_rotation = new G4RotationMatrix;
     pmt_central_rotation->rotateX(90*deg);

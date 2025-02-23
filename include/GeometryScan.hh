@@ -86,6 +86,7 @@ void ScanGeometry(std::string filename) {
         return;
   }
 
+  outFile << "x,y,z,p,name,logical" << std::endl;
 
   G4cout << "Scanning geometry low to file. Starting at: "
     << xlow << " " << ylow << " " << zlow << std::endl;
@@ -124,12 +125,14 @@ void ScanGeometry(std::string filename) {
       G4Material* material = scan_volume->GetLogicalVolume()->GetMaterial();
       if (!material) continue;
 
+      std::string name = logical->GetName();
       G4double density = material->GetDensity() / (g/cm3);
 
-      outFile << scan_pos.x() << ", "
-        << scan_pos.y() << ", "
-        << scan_pos.z() << ", "
-        << density << ", "
+      outFile << scan_pos.x() << ","
+        << scan_pos.y() << ","
+        << scan_pos.z() << ","
+        << density << ","
+        << name << ", "
         << logical << std::endl;
 
       }
