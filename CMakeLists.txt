@@ -165,6 +165,11 @@ if(WCSIM_DEBUG_PMT_PLACEMENT_REDUCTION STREQUAL ON)
   add_definitions(-DWCSIM_DEBUG_PMT_PLACEMENT_REDUCTION)
 endif()
 
+option(WCSIM_ENABLE_GPERF_PROFILING "Enable gperftool profiler linking" OFF)
+option(GPERF_LIB_DIR "gperftool non standard library location" "GPERF_LIB_DIR-NotFound")
+if(WCSIM_ENABLE_GPERF_PROFILING)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -L${GPERF_LIB_DIR} -lprofiler")
+endif()
 
 #########
 # copy extra data files
