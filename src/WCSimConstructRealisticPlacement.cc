@@ -883,13 +883,13 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
       if (i == 6) odblock_assembly->AddPlacedAssembly(block_row_odzeroindex, block_pos, block_rot);
       if (i == 7) odblock_assembly->AddPlacedAssembly(block_row_odfourindex, block_pos, block_rot);
 
-      // OD Bottom Block
+      // OD Bottom Block (Updated 29/04/25)
       if (i == 0) odblock_bottom->AddPlacedAssembly(block_row_odzeroindex, block_pos, block_rot);
       if (i == 1) odblock_bottom->AddPlacedAssembly(block_row_odoffsetindex, block_pos, block_rot);
       if (i == 2) odblock_bottom->AddPlacedAssembly(block_row_odzeroindex, block_pos, block_rot);
       if (i == 3) odblock_bottom->AddPlacedAssembly(block_row_odfourindex, block_pos, block_rot);
-      if (i == 4) odblock_bottom->AddPlacedAssembly(block_row_odoffsetindex, block_pos, block_rot);
-      if (i == 5) odblock_bottom->AddPlacedAssembly(block_row_odfourindex, block_pos, block_rot);
+      if (i == 4) odblock_bottom->AddPlacedAssembly(block_row_odzeroindex, block_pos, block_rot);
+      if (i == 5) odblock_bottom->AddPlacedAssembly(block_row_odoffsetindex, block_pos, block_rot);
 
     }
 
