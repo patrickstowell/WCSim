@@ -162,7 +162,7 @@ void HKGeometryNoLongerUsed(G4String & DetectorName)
 		 << "If you really want to use " << DetectorName
 		 << " then you can comment out the call to HKGeometryNoLongerUsed() in the method "
 		 << "WCSimDetectorConstruction::" << DetectorName << "()"
-		 << " in the file $WCSIMDIR/src/WCSimDetectorConfigs.cc and recompile, "
+		 << " in the file $WCSIM_SOURCE_DIR/src/WCSimDetectorConfigs.cc and recompile, "
 		 << "but be careful if comparing to official HK geometries that the number of PMTs are consistent" << G4endl
 		 << "Exiting..." << G4endl;
   exit(-1);
@@ -1385,17 +1385,18 @@ void WCSimDetectorConstruction::SetNuPrismBeamTest_mPMTGeometry()
 // WCTE with mPMTs (M.Shinoki)
 void WCSimDetectorConstruction::SetNuPrismBeamTest_16cShort_mPMTGeometry()
 {
-    WCDetectorName = "NuPRISMBeamTest_16cShort_mPMT";
-    WCIDCollectionName = WCDetectorName +"-glassFaceWCPMT";
-	mPMT_ID_PMT = "PMT3inchR12199_02";    //can be changed in macro through mPMT settings.
+  WCDetectorName = "NuPRISMBeamTest_16cShort_mPMT";
+  WCIDCollectionName = WCDetectorName +"-glassFaceWCPMT";
+	mPMT_ID_PMT = "PMT3inchR14374_WCTE";    //can be changed in macro through mPMT settings.
 	mPMT_OD_PMT = "PMT3inchR12199_02";
-    WCSimPMTObject * PMT = CreatePMTObject(mPMT_ID_PMT, WCIDCollectionName);
-    WCPMTName = PMT->GetPMTName();
-    WCPMTExposeHeight = PMT->GetExposeHeight();
-    WCPMTRadius = PMT->GetRadius();
+  WCSimPMTObject * PMT = CreatePMTObject(mPMT_ID_PMT, WCIDCollectionName);
+  WCPMTName = PMT->GetPMTName();
+  WCPMTExposeHeight = PMT->GetExposeHeight();
+  WCPMTRadius = PMT->GetRadius();
 
 	//mPMT params go first because detector depends on it:
-	mPMT_vessel_cyl_height = 38.*CLHEP::mm;    //option A, option B would be 277 mm
+	// mPMT_vessel_cyl_height = 38.*CLHEP::mm;    //option A, option B would be 277 mm
+  mPMT_vessel_cyl_height = 77.785*2*CLHEP::mm; // from actual mPMT measurement
 	mPMT_vessel_radius_curv = 342.*CLHEP::mm;  //needs to include the vessel thickness, as we construct from outside inwards.
 	mPMT_vessel_radius = 254.*CLHEP::mm;
 	dist_pmt_vessel = 8*CLHEP::mm;      
@@ -1416,24 +1417,32 @@ void WCSimDetectorConstruction::SetNuPrismBeamTest_16cShort_mPMTGeometry()
 	nID_PMTs = 19;
 	config_file = wcsimdir_path+"/mPMT-configfiles/mPMTconfig_19_nuPrism_3ring_WCTE.txt"; // for smaller reflector, use: mPMTconfig_19_nuPrism.txt (hex)
 
-	WCIDHeight               = 2.739*CLHEP::m;
-	WCIDDiameter             = 3.441*CLHEP::m;
+	// WCIDHeight               = 2.830845*CLHEP::m;
+	// WCIDDiameter             = 3.192536*CLHEP::m;
+  WCIDHeight               = 2.714235*CLHEP::m; // 1955+1105.475-173.12*2 mm
+  WCIDDiameter             = 3.075926*CLHEP::m; // (1711.083-173.12)*2 mm
 	WCIDVerticalPosition     = 0.;
 	
-	WCBarrelPMTOffset     = 300.*CLHEP::mm;
-    WCPMTperCellHorizontal = 1.0; // 1 per phi
-    WCPMTperCellVertical   = 1.0;
+	WCBarrelPMTOffset     = 288.*CLHEP::mm;
+  WCBarrelPMTTopOffset  = 62.355*CLHEP::mm; // 235.475-173.12
+  WCBarrelPMTBotOffset  = 331.88*CLHEP::mm; // 505.-173.12
 
-    WCBarrelNumPMTHorizontal = 16;
-    WCBarrelNRings        = 4;
-    //WCCapPMTSpacing       = (pi*WCIDDiameter/WCBarrelNumPMTHorizontal);
-    WCCapPMTSpacing       = 0.58*CLHEP::m;
-    WCCapEdgeLimit        = 1.551*m; 
-    WCBlackSheetThickness = 2.0*cm;    // deprecate soon.
-    WCAddGd               = false;
+  WCPMTperCellHorizontal = 1.0; // 1 per phi
+  WCPMTperCellVertical   = 1.0;
 
-    // default for this geometry is to rotate the barrel by half a tower
-    rotateBarrelHalfTower = true;
+  WCBarrelNumPMTHorizontal = 16;
+  WCBarrelNRings        = 4;
+  //WCCapPMTSpacing       = (pi*WCIDDiameter/WCBarrelNumPMTHorizontal);
+  WCCapPMTSpacing       = 0.58*CLHEP::m;
+  WCCapEdgeLimit        = 1.551*m; 
+  WCBlackSheetThickness = 2.0*cm;    // deprecate soon.
+  WCAddGd               = false;
+
+  // default for this geometry is to rotate the barrel by half a tower
+  rotateBarrelHalfTower = true;
+  // to place PMT behind the blacksheet
+  pmt_blacksheet_offset = (77.7865*2+347-235    // total mPMT height
+                            - 94.5)*CLHEP::mm;  // height above blacksheet
 }
 
 
@@ -1527,27 +1536,156 @@ void WCSimDetectorConstruction::SetIWCDGeometry()
 	config_file = wcsimdir_path+"/mPMT-configfiles/mPMTconfig_19_nuPrism_3ring.txt"; // for smaller reflector, use: mPMTconfig_19_nuPrism.txt (hex)
 
 	WCIDHeight               = 8.0*CLHEP::m;
-  WCIDDiameter             = 6.6*CLHEP::m;
+  WCIDDiameter             = 7.0*CLHEP::m;
   WCIDVerticalPosition     = 0.;
 	
 	WCBarrelPMTOffset     = mPMT_vessel_tot_height + 1.*CLHEP::mm;
-  WCPMTperCellHorizontal = 3; // 2 per phi
+  WCPMTperCellHorizontal = 2; // 2 per phi
   WCPMTperCellVertical   = 1;
 
 	// Numbers below are based on R.Henderson's 832 module tank design
-  WCBarrelNumPMTHorizontal = 30;
-  WCBarrelNRings        = 10;
-  WCCapPMTSpacing       = pi*WCIDDiameter/WCBarrelNumPMTHorizontal*1.2/1.1; // ad-hoc number to get 52 mPMTs on cap
-  WCCapEdgeLimit        = 3.1*m; 
+  WCBarrelNumPMTHorizontal = 24;
+  WCBarrelNRings        = 11;
+  WCCapPMTSpacing       = 0.8*m;//pi*WCIDDiameter/WCBarrelNumPMTHorizontal/1.1*0.9; // ad-hoc number to get 52 mPMTs on cap
+  WCCapEdgeLimit        = WCIDDiameter/2 - mPMT_vessel_radius; 
   WCBlackSheetThickness = 2.0*cm;    // deprecate soon.
   WCAddGd               = false;
 	hybrid = false;
+
+  // Customize PMT positions
+  useReplica = false;
+  SetPMTPositionInput(wcsimdir_path+"/data/mPMT_Position_IWCD.txt");
 }
 
-// IWCD with mPMTs, updated geometry as of 20230630, plusu OD
+// IWCD with mPMTs, updated geometry as of 20240411, plusu OD
 void WCSimDetectorConstruction::SetIWCD_WithOD_Geometry()
 {
   WCDetectorName = "IWCD_mPMT_WithOD";
+  WCIDCollectionName = WCDetectorName +"-glassFaceWCPMT";
+	mPMT_ID_PMT = "PMT3inchR12199_02";    //can be changed in macro through mPMT settings.
+	mPMT_OD_PMT = "PMT3inchR12199_02";
+  WCSimPMTObject * PMT = CreatePMTObject(mPMT_ID_PMT, WCIDCollectionName);
+  WCPMTName = PMT->GetPMTName();
+  WCPMTExposeHeight = PMT->GetExposeHeight();
+  WCPMTRadius = PMT->GetRadius();
+
+	//mPMT params go first because detector depends on it:
+	mPMT_vessel_cyl_height = 38.*CLHEP::mm;    //option A, option B would be 277 mm
+	mPMT_vessel_radius_curv = 342.*CLHEP::mm;  //needs to include the vessel thickness, as we construct from outside inwards.
+	mPMT_vessel_radius = 254.*CLHEP::mm;
+	dist_pmt_vessel = 8*CLHEP::mm;      
+	orientation = PERPENDICULAR;
+	mPMT_outer_material = "G4_PLEXIGLASS";
+	mPMT_inner_material = "Air";               // TODO: real air, hence update abs_length
+	mPMT_material_pmtAssembly = "SilGel";
+	mPMT_outer_material_d = 10*CLHEP::mm;
+	
+	// Radius of cone at z=reflectorHeight
+	id_reflector_height = 9.29*CLHEP::mm;        // From solidworks CAD drawings
+	id_reflector_z_offset = 6.12*CLHEP::mm;
+	id_reflector_angle = 46.5*CLHEP::deg;
+	mPMT_pmt_openingAngle = 8.3*CLHEP::deg;
+	G4double mPMT_vessel_tot_height = mPMT_vessel_radius + mPMT_vessel_cyl_height;
+	
+	// parameters related to filling the ID mPMT
+	nID_PMTs = 19;
+	config_file = wcsimdir_path+"/mPMT-configfiles/mPMTconfig_19_nuPrism_3ring.txt"; // for smaller reflector, use: mPMTconfig_19_nuPrism.txt (hex)
+
+	WCIDHeight               = 8.0*CLHEP::m;
+  WCIDDiameter             = 7.0*CLHEP::m;
+  WCIDVerticalPosition     = 0.;
+	
+	WCBarrelPMTOffset     = mPMT_vessel_tot_height + 1.*CLHEP::mm;
+  WCPMTperCellHorizontal = 2; // 2 per phi
+  WCPMTperCellVertical   = 1;
+
+	// Numbers below are based on R.Henderson's 832 module tank design
+  WCBarrelNumPMTHorizontal = 24;
+  WCBarrelNRings        = 11;
+  WCCapPMTSpacing       = 0.8*m;//pi*WCIDDiameter/WCBarrelNumPMTHorizontal/1.1*0.9; // ad-hoc number to get 52 mPMTs on cap
+  WCCapEdgeLimit        = WCIDDiameter/2 - mPMT_vessel_radius; 
+  WCBlackSheetThickness = 2.0*cm;    // deprecate soon.
+  WCAddGd               = false;
+	hybrid = false;
+
+  // Customize PMT positions
+  useReplica = false;
+  SetPMTPositionInput(wcsimdir_path+"/data/mPMT_Position_IWCD.txt");
+
+  ////////////////////////////////////
+  // OD Parameters --- Beta version //
+  ////////////////////////////////////
+  isODConstructed = true;
+
+  // OD Dimensions //
+  WCODLateralWaterDepth    = 0.7*m;
+  WCODHeightWaterDepth     = 0.7*m;
+  WCODDeadSpace            = 200.*mm;
+  WCODTyvekSheetThickness  = 1.*mm; // Quite standard I guess
+  WCODWLSPlatesThickness   = 0.6*cm; //
+  WCODWLSPlatesLength      = 20.*cm; //
+  WCODDiameter             = WCIDDiameter + 2*(WCBlackSheetThickness+WCODDeadSpace+WCODTyvekSheetThickness+WCODWLSPlatesThickness);
+
+  // OD PMTs //
+  WCODCollectionName = WCDetectorName + "-glassFaceWCPMT_OD";
+  WCSimPMTObject *PMTOD = CreatePMTObject("PMT3inchR14374", WCODCollectionName);
+  WCPMTODName           = PMTOD->GetPMTName();
+  WCPMTODExposeHeight   = PMTOD->GetExposeHeight();
+  WCPMTODRadius         = PMTOD->GetRadius();
+
+  // OD Coverage on barrel side //
+  WCPMTODperCellHorizontal = 2;
+  WCPMTODperCellVertical   = 1;
+
+  // OD Coverage on caps //
+  WCPMTODPercentCoverage   = 0.68; // in percent
+  // NOTE : If you set WCPMTODperCellHorizontal=0 and WCPMTODperCellVertical=0,
+  // then method ComputeWCODPMT() inside ConstructCylinder will automatically compute
+  // the nb of PMTs to put on barrel side according to WCPMTODPercentCoverage
+
+  // Shift between PMTs inside a cell //
+  WCODPMTShift = 0.*cm;
+
+  // OD caps //
+  // WCODCapPMTSpacing = 100*cm;
+  WCODCapPMTSpacing  = (pi*WCIDDiameter/(round(WCIDDiameter*sqrt(pi*WCPMTODPercentCoverage)/(10.0*WCPMTODRadius))));
+  WCODCapEdgeLimit = WCIDDiameter/2.0 - WCODWLSPlatesLength/2;
+
+  // TEST combined PMT collection for stacking action
+  std::vector<G4String> WCColName;
+  WCColName.push_back(WCIDCollectionName);
+  WCColName.push_back(WCODCollectionName);
+  CreateCombinedPMTQE(WCColName);
+  isCombinedPMTCollectionDefined=true;
+
+  // TEST WLS collection for stacking action
+  G4String WLSType = "EljenEJ286";
+  isWLSFilled = true;
+  BuildODWLSCladding = true;
+  CreateWLSObject(WLSType);
+
+  // Customize OD PMT positions
+  SetODPMTPositionInput(wcsimdir_path+"/data/mPMT_Position_IWCD_OD.txt");
+}
+
+void WCSimDetectorConstruction::SetIWCD_WithOD_Geometry_OptionA()
+{
+  SetIWCD_WithOD_Geometry();
+  useReplica = false;
+  SetPMTPositionInput(wcsimdir_path+"/data/mPMT_Position_IWCD_OptionA.txt");
+}
+
+void WCSimDetectorConstruction::SetIWCD_WithOD_Geometry_OptionC()
+{
+  SetIWCD_WithOD_Geometry();
+  WCBarrelNumPMTHorizontal = 32;
+  useReplica = false;
+  SetPMTPositionInput(wcsimdir_path+"/data/mPMT_Position_IWCD_OptionC.txt");
+}
+
+void WCSimDetectorConstruction::SetIWCD_WithOD_Geometry_Old() // Old geometry used from v1.12.5 to v1.12.11
+{
+  WCDetectorName = "IWCD_mPMT_WithOD_Old";
   WCIDCollectionName = WCDetectorName +"-glassFaceWCPMT";
 	mPMT_ID_PMT = "PMT3inchR12199_02";    //can be changed in macro through mPMT settings.
 	mPMT_OD_PMT = "PMT3inchR12199_02";
@@ -1590,7 +1728,7 @@ void WCSimDetectorConstruction::SetIWCD_WithOD_Geometry()
   WCBarrelNumPMTHorizontal = 30;
   WCBarrelNRings        = 10;
   WCCapPMTSpacing       = pi*WCIDDiameter/WCBarrelNumPMTHorizontal*1.2/1.1; // ad-hoc number to get 52 mPMTs on cap
-  WCCapEdgeLimit        = 3.1*m; 
+  WCCapEdgeLimit        = 3.1*m;
   WCBlackSheetThickness = 2.0*cm;    // deprecate soon.
   WCAddGd               = false;
 	hybrid = false;
@@ -1601,8 +1739,8 @@ void WCSimDetectorConstruction::SetIWCD_WithOD_Geometry()
   isODConstructed = true;
 
   // OD Dimensions //
-  WCODLateralWaterDepth    = 1.*m;
-  WCODHeightWaterDepth     = 1.*m;
+  WCODLateralWaterDepth    = 1*m;
+  WCODHeightWaterDepth     = 1*m;
   WCODDeadSpace            = 200.*mm;
   WCODTyvekSheetThickness  = 1.*mm; // Quite standard I guess
   WCODWLSPlatesThickness   = 0.6*cm; //

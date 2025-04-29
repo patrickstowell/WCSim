@@ -28,6 +28,12 @@
 #include "G4ReflectionFactory.hh"
 #include "G4GeometryTolerance.hh"
 #include "G4GeometryManager.hh"
+#include "G4Version.hh"
+#if G4VERSION_NUMBER < 1072
+#include "G4MultiUnion_v1072.hh" //old version does not support G4MultiUnion naively or is buggy, so use custom class
+#else
+#include "G4MultiUnion.hh"
+#endif
 
 #include "WCSimTuningParameters.hh" //jl145
 
@@ -586,7 +592,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinder()
 
 	G4cerr << "The extra tower is not correctly implemented. It causes geometry overlaps," << G4endl
 		   << " which lead to killed tracks and the incorrect number of hits." << G4endl
-		   << "You are strongly recommended to use $WCSIMDIR/sample-root-scripts/calcPhotoCoverage.C" << G4endl
+		   << "You are strongly recommended to use $WCSIM_SOURCE_DIR/sample-root-scripts/calcPhotoCoverage.C" << G4endl
 		   << " in order to produce a photocoverage that will give you a valid geometry." << G4endl
 		   << "Also be warned that, due to how PMTs are laid out in WCSim, you should be careful" << G4endl
 		   << " when using a new geometry, especially if it is a HK hybrid geometry with" << G4endl
@@ -2643,10 +2649,17 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
   else
     barrelPhiOffset = 0.;
 
+  // Use asymmetric offset only if both top and bot offsets are valid
+  if (WCBarrelPMTTopOffset<0 || WCBarrelPMTBotOffset<0)
+  {
+    WCBarrelPMTTopOffset = WCBarrelPMTOffset;
+    WCBarrelPMTBotOffset = WCBarrelPMTOffset;
+  }
+  
   // it's height:
-  barrelCellHeight  = (WCIDHeight-2.*WCBarrelPMTOffset)/WCBarrelNRings;
+  barrelCellHeight  = (WCIDHeight-WCBarrelPMTTopOffset-WCBarrelPMTBotOffset)/WCBarrelNRings;
   // the height of all regular cells together:
-  mainAnnulusHeight = WCIDHeight -2.*WCBarrelPMTOffset -2.*barrelCellHeight;
+  mainAnnulusHeight = WCIDHeight -WCBarrelPMTTopOffset-WCBarrelPMTBotOffset -2.*barrelCellHeight;
   
   //TF: has to change for mPMT vessel:
 
@@ -2667,9 +2680,11 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 	else
 	  innerAnnulusRadius = WCIDRadius - (mPMT_vessel_cyl_height + mPMT_vessel_radius) -1.*mm;
   }
+  // shift innerAnnulusRadius and outerAnnulusRadius if PMT is placed behind blacksheet
+  innerAnnulusRadius += pmt_blacksheet_offset;
 
   //TF: need to add a Polyhedra on the other side of the outerAnnulusRadius for the OD
-  outerAnnulusRadius = WCIDRadius + WCBlackSheetThickness + 1.*mm;//+ Stealstructure etc.
+  outerAnnulusRadius = WCIDRadius + WCBlackSheetThickness + 1.*mm + pmt_blacksheet_offset;//+ Stealstructure etc.
   if(isODConstructed){
     const G4double sphereRadius =
 	  (WCPMTODExposeHeight*WCPMTODExposeHeight+ WCPMTODRadius*WCPMTODRadius)/(2*WCPMTODExposeHeight);
@@ -2696,7 +2711,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
   // the radii are measured to the center of the surfaces
   // (tangent distance). Thus distances between the corner and the center are bigger.
   //BQ: Updated with new HK OD size (2020/12/06). Simply assume no tyvek thickness or dead space.
-  WCLength    = WCIDHeight + 2*(WCODHeightWaterDepth + WCBlackSheetThickness + WCODDeadSpace + WCODTyvekSheetThickness + 1*mm);
+  WCLength    = WCIDHeight + 2*(WCODHeightWaterDepth + WCBlackSheetThickness + WCODDeadSpace + WCODTyvekSheetThickness + 1*mm + pmt_blacksheet_offset);
   WCRadius    = (outerAnnulusRadius + WCODLateralWaterDepth)/cos(dPhi/2.) ;
 #ifdef WCSIMCONSTRUCTCYLINDER_VERBOSE
   G4cout
@@ -2885,41 +2900,6 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 	  logicWCBarrel->SetVisAttributes(tmpVisAtt);
    }
 	
-  //----------------- example CADMesh -----------------------
-  //                 L.Anthony 23/06/2022 
-  //---------------------------------------------------------
-  /*
-  auto shape_bunny = CADMesh::TessellatedMesh::FromSTL("/path/to/WCSim/data/bunny.stl");
-  
-  // set scale
-  shape_bunny->SetScale(1);
-  G4ThreeVector posBunny = G4ThreeVector(0*m, 0*m, 0*m);
-  
-  // make new shape a solid
-  G4VSolid* solid_bunny = shape_bunny->GetSolid();
-  
-  G4LogicalVolume* bunny_logical =                                   //logic name
-	new G4LogicalVolume(solid_bunny,                                 //solid name
-						G4Material::GetMaterial("StainlessSteel"),          //material
-						"bunny");                                     //objects name
-  // rotate if necessary
-  G4RotationMatrix* bunny_rot = new G4RotationMatrix; // Rotates X and Z axes only
-  bunny_rot->rotateX(270*deg);                 
-  bunny_rot->rotateY(45*deg);
-  
-  G4VPhysicalVolume* physiBunny =
-	new G4PVPlacement(bunny_rot,                       //no rotation
-					  posBunny,                    //at position
-					  bunny_logical,           //its logical volume
-					  "bunny",                //its name
-					  logicWCBarrel,                //its mother  volume
-					  false,                   //no boolean operation
-					  0);                       //copy number
-  //                      checkOverlaps);          //overlaps checking
-  
-  new G4LogicalSkinSurface("BunnySurface",bunny_logical,ReflectorSkinSurface);
-  */
-	
   //-----------------------------------------------------
   // Form annular section of barrel to hold PMTs 
   //----------------------------------------------------
@@ -2929,12 +2909,13 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
   G4double mainAnnulusZ[nLayers];
   G4double mainAnnulusRmin[nLayers];
   G4double mainAnnulusRmax[nLayers];
+  G4double mainAnnulusMinZ = -WCIDHeight/2. + WCBarrelPMTBotOffset + barrelCellHeight;
   for (int i=0;i<(G4int)WCBarrelNRings-1;i++)
   {
-    mainAnnulusZ[i] =  -mainAnnulusHeight/2 + mainAnnulusHeight*i/((G4int)WCBarrelNRings-2.);
+    mainAnnulusZ[i] = mainAnnulusMinZ + mainAnnulusHeight*i/((G4int)WCBarrelNRings-2.);
     G4double dr = GetRadiusChange(mainAnnulusZ[i]); // radius change at end-point
     mainAnnulusRmin[i] = innerAnnulusRadius+dr;
-    mainAnnulusRmax[i] = outerAnnulusRadius+dr;
+    mainAnnulusRmax[i] = WCIDRadius + WCBlackSheetThickness + 1.*mm + pmt_blacksheet_offset + dr; // decouple OD construction
   }
 
   G4Polyhedra* solidWCBarrelAnnulus = new G4Polyhedra("WCBarrelAnnulus",
@@ -2991,8 +2972,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
     annulusBlackSheetRmin[i] = WCIDRadius+dr;
     annulusBlackSheetRmax[i] = WCIDRadius+WCBlackSheetThickness+dr;
   }
+  G4cout << "Geometry dimension printout: " << G4endl;
   G4cout << WCIDRadius << ", " << WCBlackSheetThickness << ", " << barrelCellHeight/2. << G4endl;
-  G4cout << WCIDHeight << ", " << WCBarrelPMTOffset << ", " << WCBarrelNRings << G4endl;
+  G4cout << WCIDHeight << ", " << WCBarrelPMTTopOffset << ", " <<WCBarrelPMTBotOffset << ", " << WCBarrelNRings << G4endl;
   G4cout << dPhi << ", " << G4endl;
   for (int i=0;i<(G4int)WCBarrelNRings-1;i++)
   {
@@ -3008,64 +2990,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
                                                    annulusBlackSheetRmin,
                                                    annulusBlackSheetRmax);
 
-  G4LogicalVolume* logicWCBarrelAnnulusBlackSheet =
-    new G4LogicalVolume(solidWCBarrelBlackSheet,
-                        G4Material::GetMaterial("Blacksheet"),
-                        "WCBarrelAnnulusBlackSheet",
-                          0,0,0);
-
-   G4VPhysicalVolume* physiWCBarrelAnnulusBlackSheet =
-    new G4PVPlacement(0,
-                      G4ThreeVector(0.,0.,0.),
-                      logicWCBarrelAnnulusBlackSheet,
-                      "WCBarrelAnnulusBlackSheet",
-                      logicWCBarrelAnnulus,
-                      false,
-                      0,
-                      checkOverlaps);
-
-   
-   //G4LogicalBorderSurface * WaterBSBarrelSurface =
-	  new G4LogicalBorderSurface("WaterBSBarrelAnnulusSurface",
-								  physiWCBarrelAnnulus,
-								  physiWCBarrelAnnulusBlackSheet, 
-								  OpWaterBSSurface);
-   
-   new G4LogicalSkinSurface("BSBarrelAnnulusSkinSurface",logicWCBarrelAnnulusBlackSheet,
-							BSSkinSurface);
-
-  // Change made here to have the if statement contain the !debugmode to be consistent
-  // This code gives the Blacksheet its color. 
-
-  if (Vis_Choice == "RayTracer"){
-
-    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-      = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
-    WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
-	  WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
-    if(!debugMode)
-    {
-      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-    }
-    else
-    {
-      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
-    }
-  }
-
-  else {
-
-    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-      = new G4VisAttributes(G4Colour(0.2,0.9,0.2));
-    if(!debugMode)
-    {
-      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
-    }
-    else
-    {
-      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-    }
-  }
+  // delay blacksheet placement to create holes for intruding PMT if necessary
 
   //-----------------------------------------------------------
   // add extra tower if necessary
@@ -3078,7 +3003,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 
 	  G4cerr << "The extra tower is not correctly implemented. It causes geometry overlaps," << G4endl
 		   << " which lead to killed tracks and the incorrect number of hits." << G4endl
-		   << "You are strongly recommended to use $WCSIMDIR/sample-root-scripts/calcPhotoCoverage.C" << G4endl
+		   << "You are strongly recommended to use $WCSIM_SOURCE_DIR/sample-root-scripts/calcPhotoCoverage.C" << G4endl
 		   << " in order to produce a photocoverage that will give you a valid geometry." << G4endl
 		   << "Also be warned that, due to how PMTs are laid out in WCSim, you should be careful" << G4endl
 		   << " when using a new geometry, especially if it is a HK hybrid geometry with" << G4endl
@@ -3116,7 +3041,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 			  G4Material::GetMaterial(water),
 			  "WCExtraTower",
 			  0,0,0);
-    G4VPhysicalVolume* physiWCExtraTower = 
+    //G4VPhysicalVolume* physiWCExtraTower = 
       new G4PVPlacement(0,
 			G4ThreeVector(0.,0.,0.),
 			logicWCExtraTower,
@@ -3136,68 +3061,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
       towerBSRmin[i] = annulusBlackSheetRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
       towerBSRmax[i] = annulusBlackSheetRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
     }
-    G4Polyhedra* solidWCTowerBlackSheet = new G4Polyhedra("WCExtraTowerBlackSheet",
-			   totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
-			   2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //phi end
-		     1, //NPhi-gon
-			   WCBarrelNRings-1,
-			   mainAnnulusZ,
-			   towerBSRmin,
-			   towerBSRmax);
-    //G4cout << * solidWCTowerBlackSheet << G4endl;
-    G4LogicalVolume* logicWCTowerBlackSheet =
-      new G4LogicalVolume(solidWCTowerBlackSheet,
-			  G4Material::GetMaterial("Blacksheet"),
-			  "WCExtraTowerBlackSheet",
-			    0,0,0);
 
-    G4VPhysicalVolume* physiWCTowerBlackSheet =
-      new G4PVPlacement(0,
-			G4ThreeVector(0.,0.,0.),
-			logicWCTowerBlackSheet,
-			"WCExtraTowerBlackSheet",
-			logicWCExtraTower,
-			false,
-			0,
-			checkOverlaps);
-
-
-    //G4LogicalBorderSurface * WaterBSTowerCellSurface = 
-    new G4LogicalBorderSurface("WaterBSBarrelCellSurface",
-                    physiWCExtraTower,
-                    physiWCTowerBlackSheet, 
-                    OpWaterBSSurface);
-
-    new G4LogicalSkinSurface("BSTowerSkinSurface",logicWCTowerBlackSheet,
-                  BSSkinSurface);
-
-    // These lines add color to the blacksheet in the extratower. If using RayTracer, comment the first chunk and use the second. The Blacksheet should be green.
-  
-    if (Vis_Choice == "RayTracer"){
-    
-      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
-      WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
-      WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
-
-      if(!debugMode)
-        logicWCTowerBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-      else
-        logicWCTowerBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-    }
-
-    else {
-
-      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
-
-      if(!debugMode)
-        {logicWCTowerBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);}
-      else
-        {logicWCTowerBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);}
-    }
-  
-
+    // delay blacksheet placement to create holes for intruding PMT if necessary
   }
 
   //jl145------------------------------------------------
@@ -3363,6 +3228,19 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
     }
   }
 
+  G4LogicalVolume* logicWCExSituMPMT = ConstructExSituMultiPMT(WCPMTName, WCIDCollectionName,"tank");
+  G4LogicalVolume* logicWCInSituMPMT = ConstructInSituMultiPMT(WCPMTName, WCIDCollectionName,"tank");
+  G4LogicalVolume* logicBeamPipe = ConstructBeamPipe(); // WCTE beam pipe
+  G4LogicalVolume* logicCH = ConstructCameraHousing(); // WCTE camera housing
+
+  std::vector<G4LogicalVolume*> vlogicWCPMT(6);
+  vlogicWCPMT[0] = logicWCPMT;
+  vlogicWCPMT[1] = logicWCPMT2;
+  vlogicWCPMT[2] = logicWCExSituMPMT;
+  vlogicWCPMT[3] = logicWCInSituMPMT;
+  vlogicWCPMT[4] = logicBeamPipe;
+  vlogicWCPMT[5] = logicCH;
+
   //G4LogicalVolume* logicWCPMT = ConstructPMT(WCPMTName, WCIDCollectionName);
   G4String pmtname = "WCMultiPMT";
 
@@ -3435,6 +3313,12 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
   //
   //jl145------------------------------------------------
 
+  // Union of PMT solids to resolve overlap
+#if G4VERSION_NUMBER < 1072
+  G4MultiUnion_v1072* pmt_solid = new G4MultiUnion_v1072("UnitedPMTs_Barrel");
+#else
+  G4MultiUnion* pmt_solid = new G4MultiUnion("UnitedPMTs_Barrel");
+#endif
 
   ///////////////   Barrel PMT placement
 
@@ -3470,7 +3354,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
         PMTRotation->rotateX(-phi_offset);//align the PMT with the Cell
 
         // inclined barrel wall
-        G4int iz = (pmtPos[i].z()+mainAnnulusHeight/2.)/barrelCellHeight;
+        G4int iz = (pmtPos[i].z()-mainAnnulusMinZ)/barrelCellHeight;
         G4double dth = atan((annulusBlackSheetRmin[iz+1]-annulusBlackSheetRmin[iz])/(mainAnnulusZ[iz+1]-mainAnnulusZ[iz]));
         if(orientation == PERPENDICULAR)
           PMTRotation->rotateY(-dth); 
@@ -3480,6 +3364,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
         // ID radius is changed
         G4double newZ = pmtPos[i].z() + G4RandGauss::shoot(0,pmtPosVar);
         G4double newR = annulusBlackSheetRmin[iz]+(annulusBlackSheetRmin[iz+1]-annulusBlackSheetRmin[iz])*(newZ-mainAnnulusZ[iz])/(mainAnnulusZ[iz+1]-mainAnnulusZ[iz]);
+        newR += pmt_blacksheet_offset;
         G4double newPhi = pmtPhi-phi_offset;
         G4ThreeVector PMTPosition =  G4ThreeVector(newR,
                     newR*tan(newPhi) + G4RandGauss::shoot(0,pmtPosVar),
@@ -3494,8 +3379,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
         //G4VPhysicalVolume* physiWCBarrelPMT =
         new G4PVPlacement(PMTRotation,              // its rotation
               PMTPosition, 
-              (hybrid && pmtType[i]==2)?logicWCPMT2:logicWCPMT,                // its logical volume
-              pmtname,//"WCPMT",             // its name
+              vlogicWCPMT[pmtType[i]-1],                // its logical volume
+              pmtType[i]==5 ? "BeamPipe" : pmtname,             // its name
               !inExtraTower ? logicWCBarrelAnnulus : logicWCExtraTower,         // its mother volume
               false,                     // no boolean operations
               pmtmPMTId[i],
@@ -3505,13 +3390,17 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
         // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
         // this is still the case.
         copyNo++;
+
+        G4VSolid* solidNode = vlogicWCPMT[pmtType[i]-1]->GetSolid();
+        G4Transform3D tr(PMTRotation->inverse(), PMTPosition);
+        pmt_solid->AddNode( *solidNode, tr );
       }
     }
     else // Use auto-positioning algorithm
     {
       for (int iz=0;iz<(G4int)WCBarrelNRings-2;iz++)
       {
-        G4double z_offset = -mainAnnulusHeight/2.+barrelCellHeight*(iz+0.5);
+        G4double z_offset = mainAnnulusMinZ+barrelCellHeight*(iz+0.5);
 
         // slight different cell width at different z
         G4double barrelCellWidth = (annulusBlackSheetRmin[iz+1]+annulusBlackSheetRmin[iz])*tan(dPhi/2.);
@@ -3553,6 +3442,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 
               // ID radius is changed
               G4double newR = annulusBlackSheetRmin[iz]+(annulusBlackSheetRmin[iz+1]-annulusBlackSheetRmin[iz])*(PMTPosition.z()-mainAnnulusZ[iz])/(mainAnnulusZ[iz+1]-mainAnnulusZ[iz]);
+              newR += pmt_blacksheet_offset;
               PMTPosition.setX(newR);
 
               PMTPosition.rotateZ(phi_offset);  // align with the symmetry 
@@ -3572,6 +3462,11 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
               // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
               // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
               // this is still the case.
+
+              G4VSolid* solidNode = (i==j && hybrid && WCPMTPercentCoverage2!=0) ? logicWCPMT2->GetSolid() :
+                                                          logicWCPMT->GetSolid() ;
+              G4Transform3D tr(PMTRotation->inverse(), PMTPosition);
+              pmt_solid->AddNode( *solidNode, tr );
 
             }
           }
@@ -3593,7 +3488,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
         copyNo = 0;
         for (int iz=0;iz<WCBarrelNRings-2;iz++)
         {
-          G4double z_offset = -mainAnnulusHeight/2.+barrelCellHeight*(iz+0.5);
+          G4double z_offset = mainAnnulusMinZ+barrelCellHeight*(iz+0.5);
 
           G4double towerWidth = (annulusBlackSheetRmin[iz+1]+annulusBlackSheetRmin[iz])/2.*tan(2*pi-totalAngle);
           G4double horizontalSpacingExtra   = towerWidth/(WCBarrelNumPMTHorizontal-WCBarrelRingNPhi*WCPMTperCellHorizontal);
@@ -3622,6 +3517,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
                         -barrelCellHeight/2.+(j+0.5)*verticalSpacing+z_offset + G4RandGauss::shoot(0,pmtPosVar));
 
               G4double newR = towerBSRmin[iz]+(towerBSRmin[iz+1]-towerBSRmin[iz])*(PMTPosition.z()-mainAnnulusZ[iz])/(mainAnnulusZ[iz+1]-mainAnnulusZ[iz]);
+              newR += pmt_blacksheet_offset;
               PMTPosition.setX(newR);
 
               PMTPosition.rotateZ(-(2*pi-totalAngle)/2.+barrelPhiOffset); // align with the symmetry axes of the cell 
@@ -3639,6 +3535,11 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
                 // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
                 // daughter volumes to the PMTs (e.g. a acryl cover) you have to check, if
                 // this is still the case.
+
+              G4VSolid* solidNode = (i==j && hybrid && WCPMTPercentCoverage2!=0) ? logicWCPMT2->GetSolid() :
+                                                          logicWCPMT->GetSolid() ;
+              G4Transform3D tr(WCExtraPMTRotation->inverse(), PMTPosition);
+              pmt_solid->AddNode( *solidNode, tr );
             }
           }
 
@@ -3646,6 +3547,141 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
       }
     }
   }//end if placeBarrelPMTs
+
+  // create holes in blacksheet and do placement
+  pmt_solid -> Voxelize();
+
+  G4SubtractionSolid *solidWCBarrelBlackSheet_wHole = new G4SubtractionSolid("solidWCBarrelBlackSheet_wHole", solidWCBarrelBlackSheet, pmt_solid, 0, 
+                                                                          G4ThreeVector(0.,0.,0));
+
+  G4LogicalVolume* logicWCBarrelAnnulusBlackSheet =
+    new G4LogicalVolume(solidWCBarrelBlackSheet_wHole,
+                        G4Material::GetMaterial("Blacksheet"),
+                        "WCBarrelAnnulusBlackSheet",
+                          0,0,0);
+
+  G4VPhysicalVolume* physiWCBarrelAnnulusBlackSheet =
+    new G4PVPlacement(0,
+                      G4ThreeVector(0.,0.,0.),
+                      logicWCBarrelAnnulusBlackSheet,
+                      "WCBarrelAnnulusBlackSheet",
+                      logicWCBarrelAnnulus,
+                      false,
+                      0,
+                      checkOverlaps);
+
+   
+   //G4LogicalBorderSurface * WaterBSBarrelSurface =
+	  new G4LogicalBorderSurface("WaterBSBarrelAnnulusSurface",
+								  physiWCBarrelAnnulus,
+								  physiWCBarrelAnnulusBlackSheet, 
+								  OpWaterBSSurface);
+   
+  new G4LogicalSkinSurface("BSBarrelAnnulusSkinSurface",logicWCBarrelAnnulusBlackSheet,
+							BSSkinSurface);
+
+  // Change made here to have the if statement contain the !debugmode to be consistent
+  // This code gives the Blacksheet its color. 
+
+  if (Vis_Choice == "RayTracer"){
+
+    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+      = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
+    WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
+	  WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
+    if(!debugMode)
+    {
+      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
+    }
+    else
+    {
+      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
+    }
+  }
+
+  else {
+
+    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+      = new G4VisAttributes(G4Colour(0.2,0.9,0.2));
+    if(!debugMode)
+    {
+      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
+    }
+    else
+    {
+      logicWCBarrelAnnulusBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
+    }
+  }
+
+  if(!(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal))
+  {
+    logicWCExtraTower->SetVisAttributes(G4VisAttributes::Invisible);
+
+    G4Polyhedra* solidWCTowerBlackSheet = new G4Polyhedra("WCExtraTowerBlackSheet",
+			   totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
+			   2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //phi end
+		     1, //NPhi-gon
+			   WCBarrelNRings-1,
+			   mainAnnulusZ,
+			   towerBSRmin,
+			   towerBSRmax);
+    //G4cout << * solidWCTowerBlackSheet << G4endl;
+
+    G4SubtractionSolid *solidWCTowerBlackSheet_wHole = new G4SubtractionSolid("solidWCTowerBlackSheet_wHole", solidWCTowerBlackSheet, pmt_solid, 0, 
+                                                                          G4ThreeVector(0.,0.,0));
+
+    G4LogicalVolume* logicWCTowerBlackSheet =
+      new G4LogicalVolume(solidWCTowerBlackSheet_wHole,
+			  G4Material::GetMaterial("Blacksheet"),
+			  "WCExtraTowerBlackSheet",
+			    0,0,0);
+
+    //G4VPhysicalVolume* physiWCTowerBlackSheet =
+      new G4PVPlacement(0,
+			G4ThreeVector(0.,0.,0.),
+			logicWCTowerBlackSheet,
+			"WCExtraTowerBlackSheet",
+			logicWCExtraTower,
+			false,
+			0,
+			checkOverlaps);
+
+
+    //G4LogicalBorderSurface * WaterBSTowerCellSurface = 
+    // new G4LogicalBorderSurface("WaterBSBarrelCellSurface",
+    //                 physiWCExtraTower,
+    //                 physiWCTowerBlackSheet, 
+    //                 OpWaterBSSurface);
+
+    new G4LogicalSkinSurface("BSTowerSkinSurface",logicWCTowerBlackSheet,
+                  BSSkinSurface);
+
+    // These lines add color to the blacksheet in the extratower. If using RayTracer, comment the first chunk and use the second. The Blacksheet should be green.
+  
+    if (Vis_Choice == "RayTracer"){
+    
+      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
+      WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
+      WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
+
+      if(!debugMode)
+        logicWCTowerBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
+      else
+        logicWCTowerBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
+    }
+
+    else {
+
+      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
+
+      if(!debugMode)
+        {logicWCTowerBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);}
+      else
+        {logicWCTowerBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);}
+    }
+  }
 
   // # -------------------------------------- #
   // ##########################################
@@ -3670,12 +3706,12 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
     G4VSolid* solidWCODBotCapTyvek = nullptr;
 
     G4double odTopCapZ[4] = {
-      (-WCODDeadSpace+1*mm+WCBlackSheetThickness),
+      (-WCODDeadSpace+1*mm+WCBlackSheetThickness+pmt_blacksheet_offset),
       -.5*(WCODTyvekSheetThickness),
       -.5*(WCODTyvekSheetThickness),
       .5*(WCODTyvekSheetThickness)};
     G4double odBotCapZ[4] = {
-      -(-WCODDeadSpace+1*mm+WCBlackSheetThickness),
+      -(-WCODDeadSpace+1*mm+WCBlackSheetThickness+pmt_blacksheet_offset),
       .5*(WCODTyvekSheetThickness),
       .5*(WCODTyvekSheetThickness),
       -.5*(WCODTyvekSheetThickness)};
@@ -3820,7 +3856,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
     //-------------------------------------------------------------
     // OD Tyvek Barrel side
     // ------------------------------------------------------------
-    G4double annulusZ[2] = {-mainAnnulusHeight/2., mainAnnulusHeight/2};
+    G4double annulusZ[2] = {mainAnnulusMinZ-(barrelCellHeight+WCBarrelPMTBotOffset+pmt_blacksheet_offset+1*mm+WCBlackSheetThickness), // cover the whole barrel including the border ring
+                            mainAnnulusMinZ+(barrelCellHeight+WCBarrelPMTTopOffset+pmt_blacksheet_offset+1*mm+WCBlackSheetThickness)+mainAnnulusHeight};
     G4double annulusODTyvekRmax[2] = {(WCODRadius),
                                       WCODRadius};
     G4double annulusODTyvekRmin[2] = {(WCODRadius-WCODTyvekSheetThickness),
@@ -3857,7 +3894,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 						G4ThreeVector(0.,0.,0.),
 						logicWCBarrelODTyvek,
 						"WCBarrelCellODTyvek",
-						logicWCBarrelAnnulus,
+						logicWCBarrel,
 						false,
 						0,
 						checkOverlaps);
@@ -3916,138 +3953,186 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
     if(WCODPMTShift > barrelODCellWidth/2. - WCPMTODRadius) WCODPMTShift = 0.*cm;
 
     G4int odcopyNo = 0;
-    for (int iz=0;iz<(G4int)WCBarrelNRings-2;iz++)
-    {
-      G4double z_offset = -mainAnnulusHeight/2.+barrelCellHeight*(iz+0.5);
 
-      for (int iphi=0;iphi<WCBarrelRingNPhi;iphi++)
+    if (readODFromTable)
+    {
+      for (G4int i=0; i<nPMTsRead; i++ )
       {
-        G4double phi_offset = (iphi+0.5)*dPhi+barrelPhiOffset;
+        if (!pmtUse[i]) continue; // skip PMT
+        if (pmtSection[i]!=10) continue; // only place barrel OD PMT
 
         G4RotationMatrix* WCPMTODRotation = new G4RotationMatrix;
         WCPMTODRotation->rotateY(270.*deg);
+
+        G4double pmtPhi = atan2(pmtPos[i].y(),pmtPos[i].x());
+        if (pmtPhi<barrelPhiOffset) pmtPhi += 2*pi;
+        G4int iphi = (pmtPhi-barrelPhiOffset)/dPhi;
+        G4bool inExtraTower = (iphi >= WCBarrelRingNPhi);
+        G4double phi_offset = !inExtraTower ? (iphi+0.5)*dPhi+barrelPhiOffset 
+                                            : barrelPhiOffset-(2*pi-totalAngle)/2.;
         WCPMTODRotation->rotateX(phi_offset);//align the PMT with the Cell
 
-        for(G4long i = 0; i < WCPMTODperCellHorizontal; i++){
-          for(G4long j = 0; j < WCPMTODperCellVertical; j++){
+        // ID radius is changed
+        G4double newZ = pmtPos[i].z() + G4RandGauss::shoot(0,pmtPosVar);
+        G4double newR = WCODRadius;
+        G4double newPhi = pmtPhi-phi_offset;
+        G4ThreeVector ODPMTPosition =  
+          G4ThreeVector(newR,
+                        newR*tan(newPhi) + G4RandGauss::shoot(0,pmtPosVar),
+                        newZ);
+        WCPMTODRotation->rotateZ(pmtRotaton[i]); 
+        G4cout<<"OD Barrel PMT ID = "<<i<<", Position = "<<pmtPos[i].x()<<" "<<pmtPos[i].y()<<" "<<pmtPos[i].z()<<", Rotation = "<<pmtRotaton[i]<<G4endl;
 
-            G4cout << "Adding OD PMT in iz = "<< iz <<" iphi = "<< iphi << " cell " << i << ", " << j << G4endl;
+        ODPMTPosition.rotateZ(phi_offset);  // align with the symmetry 
+                                          //axes of the cell 
 
-            G4ThreeVector Container =  G4ThreeVector(WCODRadius,
-                                                    -barrelODCellWidth/2.+(i+0.5)*horizontalODSpacing+((G4int)(std::pow(-1,j))*(G4int)(WCODPMTShift)/2),
-                                                    -(barrelCellHeight * (barrelODCellWidth/barrelCellWidth))/2.+(j+0.5)*verticalODSpacing + z_offset);
-
-            Container.rotateZ(phi_offset);  // align with the symmetry axes of the cell 
-
-        //		G4cout << " qqqqqqqqqqqqqqqqqqqqqqqq barrel i " << i << " of " << WCPMTODperCellHorizontal << " j " << j << " of " << WCPMTODperCellVertical << " Container (" << Container.x() << ", " << Container.y()
-        //				  << ", " << Container.z() << ") " << G4endl;
-
-            //G4VPhysicalVolume* physiWCBarrelWLSPlate =
-            new G4PVPlacement(WCPMTODRotation,           // its rotation
-                  Container,
-                  logicWCODWLSAndPMT,         // its logical volume
-                  "WCBarrelCellODContainer",  // its name
-                  logicWCBarrelAnnulus,         // its mother volume
-                  false,                     // no boolean operations
-                  odcopyNo++,
-                  checkOverlapsPMT);
-
-          }
-        }
+        new G4PVPlacement(WCPMTODRotation,              // its rotation
+              ODPMTPosition, 
+              logicWCODWLSAndPMT,                // its logical volume
+              "WCBarrelCellODContainer",  // its name
+              logicWCBarrel,         // its mother volume
+              false,                     // no boolean operations
+              pmtmPMTId[i],
+              checkOverlapsPMT);             
+                           
+        odcopyNo++;
       }
     }
-
-
-    //-------------------------------------------------------------
-    // Add PMTs in extra Tower if necessary
-    //------------------------------------------------------------
-
-    // EXTRA TOWER PART
-    if(!(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal)){
-
-      // TYVEK
-
-      G4double towerODTyvekRmin[2];
-      G4double towerODTyvekRmax[2];
-      for(int i = 0; i < 2; i++){
-        towerODTyvekRmin[i] = annulusODTyvekRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
-        towerODTyvekRmax[i] = annulusODTyvekRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
-      }
-      G4Polyhedra* solidWCTowerODTyvek = new G4Polyhedra("WCExtraTowerODTyvek",
-                                                         totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
-                                                         2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //phi end
-                                                         1, //NPhi-gon
-                                                         2,
-                                                         annulusZ,
-                                                         towerODTyvekRmin,
-                                                         towerODTyvekRmax);
-
-      G4LogicalVolume* logicWCTowerODTyvek =
-		new G4LogicalVolume(solidWCTowerODTyvek,
-							G4Material::GetMaterial("Tyvek"),
-							"WCExtraTowerODTyvek",
-							0,0,0);
-
-      //G4LogicalSkinSurface *WaterExtraTySurfaceSide =
-	  new G4LogicalSkinSurface("WaterExtraTySurfaceSide", logicWCTowerODTyvek, OpWaterTySurface);
-
-
-      logicWCTowerODTyvek->SetVisAttributes(G4VisAttributes::Invisible);
-      //// Uncomment following for TYVEK visualization
-      logicWCTowerODTyvek->SetVisAttributes(WCBarrelODTyvekCellVisAtt);
-
-
-      //G4VPhysicalVolume* physiWCTowerODTyvek =
-	  new G4PVPlacement(0,
-						G4ThreeVector(0.,0.,0.),
-						logicWCTowerODTyvek,
-						"WCExtraTowerODTyvek",
-						logicWCExtraTower,
-						false,
-						0,
-						checkOverlaps);
-
-      // PMTs
-
-      G4RotationMatrix* WCExtraODPMTRotation = new G4RotationMatrix;
-      WCExtraODPMTRotation->rotateY(270.*deg);
-      WCExtraODPMTRotation->rotateX(2*pi - (2*pi-totalAngle)/2.+barrelPhiOffset);//align the PMT with the Cell
-
-      G4double towerWidthOD = WCODRadius*tan(2*pi-totalAngle);
-      // We don't want the same number of OD PMTs squished horizontally so we scale down the horizontal PMTs by the width of the extra tower
-      G4double ratioOfWidths = (double)(WCPMTODperCellHorizontal)*(towerWidthOD/barrelODCellWidth);
-      G4long WCPMTODperCellHorizontalExtra = std::lround(ratioOfWidths);
-      G4double horizontalODSpacingExtra   = towerWidthOD/(double)WCPMTODperCellHorizontalExtra;
-      // verticalODSpacing is identical to that for normal cell.
-
-      odcopyNo = 0;
-      for (int iz=0;iz<(G4int)WCBarrelNRings-2;iz++)
+    else
+    {
+      for (int iz=0;iz<(G4int)WCBarrelNRings;iz++)
       {
-        G4double z_offset = -mainAnnulusHeight/2.+barrelCellHeight*(iz+0.5);
-        for(G4long i = 0; i < (WCPMTODperCellHorizontalExtra); i++){
-          for(G4long j = 0; j < WCPMTODperCellVertical; j++){
-            G4cout << "Adding OD PMT in iz = "<< iz << " cell " << i << ", " << j << G4endl;
-            G4ThreeVector Container =  G4ThreeVector((WCODRadius)/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.),
-                                -towerWidthOD/2.+(i+0.5)*horizontalODSpacingExtra,
-                                -(barrelCellHeight * (WCODRadius/WCIDRadius))/2.+(j+0.5)*verticalODSpacing+z_offset);
+        G4double z_offset = mainAnnulusMinZ+barrelCellHeight*(iz-0.5);
 
-            Container.rotateZ(-(2*pi-totalAngle)/2.+barrelPhiOffset); // align with the symmetry
+        for (int iphi=0;iphi<WCBarrelRingNPhi;iphi++)
+        {
+          G4double phi_offset = (iphi+0.5)*dPhi+barrelPhiOffset;
 
-            //G4VPhysicalVolume* physiWCExtraBarrelWLSPlate =
-            new G4PVPlacement(WCExtraODPMTRotation,              // its rotation
+          G4RotationMatrix* WCPMTODRotation = new G4RotationMatrix;
+          WCPMTODRotation->rotateY(270.*deg);
+          WCPMTODRotation->rotateX(phi_offset);//align the PMT with the Cell
+
+          for(G4long i = 0; i < WCPMTODperCellHorizontal; i++){
+            for(G4long j = 0; j < WCPMTODperCellVertical; j++){
+
+              G4cout << "Adding OD PMT in iz = "<< iz <<" iphi = "<< iphi << " cell " << i << ", " << j << G4endl;
+
+              G4ThreeVector Container =  G4ThreeVector(WCODRadius,
+                                                      -barrelODCellWidth/2.+(i+0.5)*horizontalODSpacing+((G4int)(std::pow(-1,j))*(G4int)(WCODPMTShift)/2),
+                                                      -(barrelCellHeight * (barrelODCellWidth/barrelCellWidth))/2.+(j+0.5)*verticalODSpacing + z_offset);
+
+              Container.rotateZ(phi_offset);  // align with the symmetry axes of the cell 
+
+          //		G4cout << " qqqqqqqqqqqqqqqqqqqqqqqq barrel i " << i << " of " << WCPMTODperCellHorizontal << " j " << j << " of " << WCPMTODperCellVertical << " Container (" << Container.x() << ", " << Container.y()
+          //				  << ", " << Container.z() << ") " << G4endl;
+
+              //G4VPhysicalVolume* physiWCBarrelWLSPlate =
+              new G4PVPlacement(WCPMTODRotation,           // its rotation
                     Container,
-                    logicWCODWLSAndPMT,                // its logical volume
-                    "WCExtraBarrelCellODContainer",             // its name
-                    logicWCExtraTower,         // its mother volume
+                    logicWCODWLSAndPMT,         // its logical volume
+                    "WCBarrelCellODContainer",  // its name
+                    logicWCBarrel,         // its mother volume
                     false,                     // no boolean operations
                     odcopyNo++,
                     checkOverlapsPMT);
 
-
+            }
           }
         }
       }
 
+
+      //-------------------------------------------------------------
+      // Add PMTs in extra Tower if necessary
+      //------------------------------------------------------------
+
+      // EXTRA TOWER PART
+      if(!(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal)){
+
+        // TYVEK
+
+        G4double towerODTyvekRmin[2];
+        G4double towerODTyvekRmax[2];
+        for(int i = 0; i < 2; i++){
+          towerODTyvekRmin[i] = annulusODTyvekRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
+          towerODTyvekRmax[i] = annulusODTyvekRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
+        }
+        G4Polyhedra* solidWCTowerODTyvek = new G4Polyhedra("WCExtraTowerODTyvek",
+                                                          totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
+                                                          2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //phi end
+                                                          1, //NPhi-gon
+                                                          2,
+                                                          annulusZ,
+                                                          towerODTyvekRmin,
+                                                          towerODTyvekRmax);
+
+        G4LogicalVolume* logicWCTowerODTyvek =
+          new G4LogicalVolume(solidWCTowerODTyvek,
+                G4Material::GetMaterial("Tyvek"),
+                "WCExtraTowerODTyvek",
+                0,0,0);
+
+        //G4LogicalSkinSurface *WaterExtraTySurfaceSide =
+        new G4LogicalSkinSurface("WaterExtraTySurfaceSide", logicWCTowerODTyvek, OpWaterTySurface);
+
+
+        logicWCTowerODTyvek->SetVisAttributes(G4VisAttributes::Invisible);
+        //// Uncomment following for TYVEK visualization
+        logicWCTowerODTyvek->SetVisAttributes(WCBarrelODTyvekCellVisAtt);
+
+
+        //G4VPhysicalVolume* physiWCTowerODTyvek =
+        new G4PVPlacement(0,
+              G4ThreeVector(0.,0.,0.),
+              logicWCTowerODTyvek,
+              "WCExtraTowerODTyvek",
+              logicWCBarrel,
+              false,
+              0,
+              checkOverlaps);
+
+        // PMTs
+
+        G4RotationMatrix* WCExtraODPMTRotation = new G4RotationMatrix;
+        WCExtraODPMTRotation->rotateY(270.*deg);
+        WCExtraODPMTRotation->rotateX(2*pi - (2*pi-totalAngle)/2.+barrelPhiOffset);//align the PMT with the Cell
+
+        G4double towerWidthOD = WCODRadius*tan(2*pi-totalAngle);
+        // We don't want the same number of OD PMTs squished horizontally so we scale down the horizontal PMTs by the width of the extra tower
+        G4double ratioOfWidths = (double)(WCPMTODperCellHorizontal)*(towerWidthOD/barrelODCellWidth);
+        G4long WCPMTODperCellHorizontalExtra = std::lround(ratioOfWidths);
+        G4double horizontalODSpacingExtra   = towerWidthOD/(double)WCPMTODperCellHorizontalExtra;
+        // verticalODSpacing is identical to that for normal cell.
+
+        // odcopyNo = 0;
+        for (int iz=0;iz<(G4int)WCBarrelNRings;iz++)
+        {
+          G4double z_offset = mainAnnulusMinZ+barrelCellHeight*(iz-0.5);
+          for(G4long i = 0; i < (WCPMTODperCellHorizontalExtra); i++){
+            for(G4long j = 0; j < WCPMTODperCellVertical; j++){
+              G4cout << "Adding OD PMT in iz = "<< iz << " cell " << i << ", " << j << G4endl;
+              G4ThreeVector Container =  G4ThreeVector((WCODRadius)/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.),
+                                  -towerWidthOD/2.+(i+0.5)*horizontalODSpacingExtra,
+                                  -(barrelCellHeight * (WCODRadius/WCIDRadius))/2.+(j+0.5)*verticalODSpacing+z_offset);
+
+              Container.rotateZ(-(2*pi-totalAngle)/2.+barrelPhiOffset); // align with the symmetry
+
+              //G4VPhysicalVolume* physiWCExtraBarrelWLSPlate =
+              new G4PVPlacement(WCExtraODPMTRotation,              // its rotation
+                      Container,
+                      logicWCODWLSAndPMT,                // its logical volume
+                      "WCExtraBarrelCellODContainer",             // its name
+                      logicWCBarrel,         // its mother volume
+                      false,                     // no boolean operations
+                      odcopyNo++,
+                      checkOverlapsPMT);
+
+
+            }
+          }
+        }
+
+      }
     }
 
     //---------------------------------------------------------
@@ -4056,70 +4141,111 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 
     G4double xoffset;
     G4double yoffset;
-    G4int    icopy = 0;
+    G4int    icopy_top = 0, icopy_bot = 0;
 
-    G4RotationMatrix* WCCapPMTRotation = new G4RotationMatrix;
-    WCCapPMTRotation->rotateY(180.*deg);
+    if (readODFromTable)
+    {
+      for (G4int i=0; i<nPMTsRead; i++ )
+      {
+        if (!pmtUse[i]) continue; // skip PMT
+        G4double zpos = ((WCIDHeight + 2*WCODDeadSpace)/2)+WCODTyvekSheetThickness;
+        G4RotationMatrix* WCCapPMTRotation = new G4RotationMatrix;
+        // only place cap OD PMT
+        if (pmtSection[i]==11)
+        {
+          icopy_top++;
+        }
+        else if (pmtSection[i]==13)
+        {
+          icopy_bot++;
+          zpos *= -1;
+          WCCapPMTRotation->rotateY(180.*deg);
+        }
+        else continue; 
+
+        G4ThreeVector WLSpos    = G4ThreeVector(pmtPos[i].x() + G4RandGauss::shoot(0,pmtPosVar),
+                                                pmtPos[i].y() + G4RandGauss::shoot(0,pmtPosVar),
+                                                zpos);
+        G4cout<<"OD Cap PMT ID = "<<i<<", Position = "<<pmtPos[i].x()<<" "<<pmtPos[i].y()<<" "<<pmtPos[i].z()<<", Rotation = "<<pmtRotaton[i]<<G4endl;
+        WCCapPMTRotation->rotateZ(pmtRotaton[i]); 
+
+        new G4PVPlacement(WCCapPMTRotation,                   // its rotation
+                          WLSpos,
+                          logicWCODWLSAndPMT,   // its logical volume
+                          pmtSection[i]==11 ? "WCTopCapContainerOD" : "WCBottomCapContainerOD",// its name
+                          logicWCBarrel,       // its mother volume
+                          false,               // no boolean operations
+                          pmtmPMTId[i],
+                          checkOverlapsPMT);
+      }
+    }
+    else
+    {
+      G4RotationMatrix* WCCapPMTRotation = new G4RotationMatrix;
+      WCCapPMTRotation->rotateY(180.*deg);
+      // loop over the cap
+      G4int CapNCell = (G4int)(WCODCapEdgeLimit/WCODCapPMTSpacing) + 2;
+      for ( int i = -CapNCell ; i <  CapNCell; i++) {
+        for (int j = -CapNCell ; j <  CapNCell; j++) {
+
+          G4cout << "Adding OD PMT in top/bottom cap cell " << i << ", " << j << G4endl;
+
+          xoffset = i*WCODCapPMTSpacing + WCODCapPMTSpacing*0.5;
+          yoffset = j*WCODCapPMTSpacing + WCODCapPMTSpacing*0.5;
+
+          G4ThreeVector topWLSpos = G4ThreeVector(xoffset,
+                                                  yoffset,
+                                                  ((WCIDHeight + 2*WCODDeadSpace)/2)+WCODTyvekSheetThickness);
+
+          G4ThreeVector bottomWLSpos = G4ThreeVector(xoffset,
+                                                    yoffset,
+                                                    -topWLSpos.getZ());
+
+          if (((sqrt(xoffset*xoffset + yoffset*yoffset) + WCPMTODRadius) < WCODCapEdgeLimit) ) {
 
 
-    // loop over the cap
-    G4int CapNCell = (G4int)(WCODCapEdgeLimit/WCODCapPMTSpacing) + 2;
-    for ( int i = -CapNCell ; i <  CapNCell; i++) {
-      for (int j = -CapNCell ; j <  CapNCell; j++) {
+        //		  G4cout << " qqqqqqqqqqqqqqqqqqqqqqqq cap i " << i << " of " << CapNCell << " j " << j << " of " << CapNCell << " Container (" << topWLSpos.x() << ", " << topWLSpos.y()
+        //				  << ", " << topWLSpos.z() << ") " << G4endl;
 
-		    G4cout << "Adding OD PMT in top/bottom cap cell " << i << ", " << j << G4endl;
-
-        xoffset = i*WCODCapPMTSpacing + WCODCapPMTSpacing*0.5;
-        yoffset = j*WCODCapPMTSpacing + WCODCapPMTSpacing*0.5;
-
-        G4ThreeVector topWLSpos = G4ThreeVector(xoffset,
-                                                yoffset,
-                                                ((WCIDHeight + 2*WCODDeadSpace)/2)+WCODTyvekSheetThickness);
-
-        G4ThreeVector bottomWLSpos = G4ThreeVector(xoffset,
-                                                   yoffset,
-                                                   -topWLSpos.getZ());
-
-        if (((sqrt(xoffset*xoffset + yoffset*yoffset) + WCPMTODRadius) < WCODCapEdgeLimit) ) {
+            //G4VPhysicalVolume* physiTopCapWLSPlate =
+            new G4PVPlacement(0,                   // its rotation
+                      topWLSpos,
+                      logicWCODWLSAndPMT,   // its logical volume
+                      "WCTopCapContainerOD",// its name
+                      logicWCBarrel,       // its mother volume
+                      false,               // no boolean operations
+                      odcopyNo++,
+                      checkOverlapsPMT);
+            icopy_top++;
 
 
-		  //		  G4cout << " qqqqqqqqqqqqqqqqqqqqqqqq cap i " << i << " of " << CapNCell << " j " << j << " of " << CapNCell << " Container (" << topWLSpos.x() << ", " << topWLSpos.y()
-		  //				  << ", " << topWLSpos.z() << ") " << G4endl;
+            //G4VPhysicalVolume* physiBottomCapWLSPlate =
+            new G4PVPlacement(WCCapPMTRotation,                             // its rotation
+                      bottomWLSpos,
+                      logicWCODWLSAndPMT,   // its logical volume
+                      "WCBottomCapContainerOD",                // its name
+                      logicWCBarrel,                 // its mother volume
+                      false,                         // no boolean operations
+                      odcopyNo++,
+                      checkOverlapsPMT);
+            icopy_bot++;
 
-          //G4VPhysicalVolume* physiTopCapWLSPlate =
-          new G4PVPlacement(0,                   // its rotation
-                    topWLSpos,
-                    logicWCODWLSAndPMT,   // its logical volume
-                    "WCTopCapContainerOD",// its name
-                    logicWCBarrel,       // its mother volume
-                    false,               // no boolean operations
-                    icopy,
-                    checkOverlapsPMT);
-
-
-          //G4VPhysicalVolume* physiBottomCapWLSPlate =
-          new G4PVPlacement(WCCapPMTRotation,                             // its rotation
-                    bottomWLSpos,
-                    logicWCODWLSAndPMT,   // its logical volume
-                    "WCBottomCapContainerOD",                // its name
-                    logicWCBarrel,                 // its mother volume
-                    false,                         // no boolean operations
-                    icopy,
-                    checkOverlapsPMT);
-
-          icopy++;
-
+          }
         }
       }
     }
 
     G4cout << "#### OD ####" << "\n";
-    G4cout << " total on cap: " << icopy << "\n";
-    G4cout << " Coverage was calculated to be: " << (icopy*WCPMTODRadius*WCPMTODRadius/(WCIDRadius*WCIDRadius)) << "\n";
+    G4cout << " total on top cap: " << icopy_top << "\n";
+    G4cout << " Coverage was calculated to be: " << (icopy_top*WCPMTODRadius*WCPMTODRadius/(WCIDRadius*WCIDRadius)) << "\n";
+    G4cout << " total on bottom cap: " << icopy_bot << "\n";
+    G4cout << " Coverage was calculated to be: " << (icopy_bot*WCPMTODRadius*WCPMTODRadius/(WCIDRadius*WCIDRadius)) << "\n";
     G4cout << "############" << "\n";
 
   } // END if isODConstructed
 
+  topCapAssemblyHeight = WCBarrelPMTTopOffset+barrelCellHeight+1*mm+WCBlackSheetThickness+pmt_blacksheet_offset;
+  botCapAssemblyHeight = WCBarrelPMTBotOffset+barrelCellHeight+1*mm+WCBlackSheetThickness+pmt_blacksheet_offset;
   G4LogicalVolume* logicTopCapAssembly = ConstructCapsNoReplica(true);
   G4LogicalVolume* logicBottomCapAssembly = ConstructCapsNoReplica(false);
 
@@ -4135,7 +4261,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 
   //G4VPhysicalVolume* physiTopCapAssembly =
   new G4PVPlacement(0,
-                  G4ThreeVector(0.,0.,(mainAnnulusHeight/2.+capAssemblyHeight/2.)),
+                  G4ThreeVector(0.,0.,(mainAnnulusMinZ+mainAnnulusHeight+topCapAssemblyHeight/2.)),
                   logicTopCapAssembly,
                   "TopCapAssembly",
                   logicWCBarrel,
@@ -4144,7 +4270,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCylinderNoReplica()
 
   //G4VPhysicalVolume* physiBottomCapAssembly =
   new G4PVPlacement(0,
-                  G4ThreeVector(0.,0.,(-mainAnnulusHeight/2.-capAssemblyHeight/2.)),
+                  G4ThreeVector(0.,0.,(mainAnnulusMinZ-botCapAssemblyHeight/2.)),
                   logicBottomCapAssembly,
                   "BottomCapAssembly",
                   logicWCBarrel,
@@ -4169,13 +4295,16 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
   const G4String bbstr  = G4String("Barrel") +
                 oristr + G4String("Border");   // "Barrel[Top|Bot]Border"
 
-  capAssemblyHeight = (WCIDHeight-mainAnnulusHeight)/2+1*mm+WCBlackSheetThickness;
+  capAssemblyHeight = flipz ? topCapAssemblyHeight : botCapAssemblyHeight;
+  G4double capAssemblyZEdge = flipz ? WCIDHeight/2-WCBarrelPMTTopOffset-barrelCellHeight :
+                                     -WCIDHeight/2+WCBarrelPMTBotOffset+barrelCellHeight ;
+  G4double CapBarrelPMTOffset = flipz ? WCBarrelPMTTopOffset : WCBarrelPMTBotOffset ;
 
   const G4String caname = capstr + G4String("Assembly");  // "[Top|Bot]CapAssembly"
   G4Tubs* solidCapAssembly = new G4Tubs(caname,
 							0.0*m,
               // use the largest radius in cap region
-							(outerAnnulusRadius+std::max(GetRadiusChange(-zflip*WCIDHeight/2),GetRadiusChange(-zflip*mainAnnulusHeight/2)))/cos(dPhi/2.), 
+							(WCIDRadius + WCBlackSheetThickness + 1.*mm + pmt_blacksheet_offset +std::max(GetRadiusChange(-zflip*WCIDHeight/2),GetRadiusChange(capAssemblyZEdge)))/cos(dPhi/2.), 
 							capAssemblyHeight/2,
 							0.*deg,
 							360.*deg);
@@ -4193,16 +4322,16 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
   //----------------------------------------------------
   // extra rings for the top and bottom of the annulus
   //---------------------------------------------------
-  G4double borderAnnulusZ[3] = {(-barrelCellHeight/2.-(WCIDRadius-innerAnnulusRadius))*zflip, 
+  G4double borderAnnulusZ[3] = {(-barrelCellHeight/2.)*zflip, 
 								-barrelCellHeight/2.*zflip,
 								barrelCellHeight/2.*zflip};
+  G4double borderAnnulusGloblaZ[3] = {capAssemblyZEdge-zflip*(barrelCellHeight),
+                                      capAssemblyZEdge-zflip*barrelCellHeight,
+                                      capAssemblyZEdge};
   // Get the radius at global z 
-  G4double borderAnnulusRmin[3] = { WCIDRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight+(WCIDRadius-innerAnnulusRadius))),
-                                    innerAnnulusRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight)), 
-                                    innerAnnulusRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2)) };
-  G4double borderAnnulusRmax[3] = { outerAnnulusRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight+(WCIDRadius-innerAnnulusRadius))), 
-                                    outerAnnulusRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight)),
-                                    outerAnnulusRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2)) };
+  G4double borderAnnulusRmin[3] = { WCIDRadius + GetRadiusChange(borderAnnulusGloblaZ[0]),
+                                    innerAnnulusRadius + GetRadiusChange(borderAnnulusGloblaZ[1]), 
+                                    innerAnnulusRadius + GetRadiusChange(borderAnnulusGloblaZ[2]) };
 
   if(std::abs(borderAnnulusZ[2] - borderAnnulusZ[0]) > capAssemblyHeight - WCBlackSheetThickness) {
     G4cerr << "IMPOSSIBLE GEOMETRY:  capAssemblyHeight (" 
@@ -4215,49 +4344,17 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
 
   const G4String bbrname = G4String("WC") +
                 bbstr + G4String("Ring");  // "WCBarrel[Top|Bot]BorderRing"
-  G4Polyhedra* solidWCBarrelBorderRing = new G4Polyhedra(bbrname,
-                                                   barrelPhiOffset, // phi start
-                                                   totalAngle,
-                                                   WCBarrelRingNPhi, //NPhi-gon
-                                                   3,
-                                                   borderAnnulusZ,
-                                                   borderAnnulusRmin,
-                                                   borderAnnulusRmax);
-  G4LogicalVolume* logicWCBarrelBorderRing =
-    new G4LogicalVolume(solidWCBarrelBorderRing,
-                        G4Material::GetMaterial(water),
-                        "WCBarrelRing",
-                        0,0,0);
-  //G4cout << *solidWCBarrelBorderRing << G4endl;
-
-  G4VPhysicalVolume* physiWCBarrelBorderRing =
-    new G4PVPlacement(0,
-                  G4ThreeVector(0.,0.,(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip),
-                  logicWCBarrelBorderRing,
-                  bbrname,
-                  logicCapAssembly,
-                  false, 0,
-				          checkOverlaps);
-           
-  if(!debugMode){ 
-
-    tmpVisAtt = new G4VisAttributes(G4Colour(1.,0.5,0.5));
-  	tmpVisAtt->SetForceSolid(true);// This line is used to give definition to the cells in OGLSX Visualizer
-  	//logicWCBarrelBorderRing->SetVisAttributes(tmpVisAtt); 
-    logicWCBarrelBorderRing->SetVisAttributes(G4VisAttributes::Invisible); 
-	//TF vis.
-  }
 
   //------------------------------------------------------------
   // add blacksheet to the border cells.
   // ---------------------------------------------------------
   // the part between the barrel ring and cap was missing before
-  G4double annulusBlackSheetRmax[3] = { WCIDRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight+(WCIDRadius-innerAnnulusRadius))) + WCBlackSheetThickness,
-                                        WCIDRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight)) + WCBlackSheetThickness,
-                                        WCIDRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2)) + WCBlackSheetThickness};
-  G4double annulusBlackSheetRmin[3] = { WCIDRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight+(WCIDRadius-innerAnnulusRadius))),
-                                        WCIDRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2+barrelCellHeight)),
-                                        WCIDRadius + GetRadiusChange(-zflip*(mainAnnulusHeight/2))};
+  G4double annulusBlackSheetRmax[3] = { WCIDRadius + GetRadiusChange(borderAnnulusGloblaZ[0]) + WCBlackSheetThickness,
+                                        WCIDRadius + GetRadiusChange(borderAnnulusGloblaZ[1]) + WCBlackSheetThickness,
+                                        WCIDRadius + GetRadiusChange(borderAnnulusGloblaZ[2]) + WCBlackSheetThickness};
+  G4double annulusBlackSheetRmin[3] = { WCIDRadius + GetRadiusChange(borderAnnulusGloblaZ[0]),
+                                        WCIDRadius + GetRadiusChange(borderAnnulusGloblaZ[1]),
+                                        WCIDRadius + GetRadiusChange(borderAnnulusGloblaZ[2])};
   const G4String bbbsname = bbrname + G4String("BlackSheet");    // "WCBarrel[Top|Bot]BorderBlackSheet"                                      
   G4Polyhedra* solidWCBarrelBlackSheet = new G4Polyhedra(bbbsname,
                                                    barrelPhiOffset, // phi start
@@ -4267,72 +4364,12 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
                                                    borderAnnulusZ,
                                                    annulusBlackSheetRmin,
                                                    annulusBlackSheetRmax);
+  // delay blacksheet placement to create holes for intruding PMT if necessary
 
-  G4LogicalVolume* logicWCBarrelBorderBlackSheet =
-    new G4LogicalVolume(solidWCBarrelBlackSheet,
-                        G4Material::GetMaterial("Blacksheet"),
-                        bbbsname,
-                        0,0,0);
-
-  G4VPhysicalVolume* physiWCBarrelBorderBlackSheet =
-    new G4PVPlacement(0,
-                      G4ThreeVector(0.,0.,0.),
-                      logicWCBarrelBorderBlackSheet,
-                      bbbsname,
-                      logicWCBarrelBorderRing,
-                      false,
-                      0,
-                      checkOverlaps);
-
-  
-  const G4String bbwbssname = bbrname + G4String("WaterBSSurface");
-  //G4LogicalBorderSurface * WaterBSBarrelSurface = 
-	new G4LogicalBorderSurface(bbwbssname,
-								  physiWCBarrelBorderRing,
-								  physiWCBarrelBorderBlackSheet, 
-								  OpWaterBSSurface);
-   
-  new G4LogicalSkinSurface("BSBarrelBorderSkinSurface",logicWCBarrelBorderBlackSheet,
-							BSSkinSurface);
-
-  // Change made here to have the if statement contain the !debugmode to be consistent
-  // This code gives the Blacksheet its color. 
-
-  if (Vis_Choice == "RayTracer"){
-
-    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-      = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
-    WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
-	  WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
-    if(!debugMode)
-    {
-      logicWCBarrelBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-    }
-    else
-    {
-      logicWCBarrelBorderBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
-    }
-  }
-
-  else {
-
-    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-      = new G4VisAttributes(G4Colour(0.2,0.9,0.2));
-    if(!debugMode)
-    {
-      logicWCBarrelBorderBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
-    }
-    else
-    {
-      logicWCBarrelBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-    }
-  }
-
-  // we have to declare the logical Volumes 
-  // outside of the if block to access it later on 
-  G4LogicalVolume* logicWCExtraBorderCell = nullptr;
   const G4String etbcname = G4String("WCExtraTower") + oristr +
         G4String("BorderCell");      // "WCExtraTower[Top|Bot]]BorderCell"
+  const G4String etbcbsname = etbcname +
+        G4String("BlackSheet");      // "WCExtraTower[Top|Bot]]BorderCellBlackSheet"
   G4double towerBSRmin[3];
   G4double towerBSRmax[3];
   if(!(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal)){
@@ -4342,43 +4379,6 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
     // (the top cell is created later on by reflecting the
     // bottom cell) 
     //---------------------------------------------
-    G4double extraBorderRmin[3];
-    G4double extraBorderRmax[3];
-    for(int i = 0; i < 3; i++){
-      extraBorderRmin[i] = borderAnnulusRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
-      extraBorderRmax[i] = borderAnnulusRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
-    } 
-    G4Polyhedra* solidWCExtraBorderCell = new G4Polyhedra(etbcname,
-			   totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
-			   2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //total phi
-			   1, //NPhi-gon
-			   3,
-			   borderAnnulusZ,
-			   extraBorderRmin,
-			   extraBorderRmax);
-
-    logicWCExtraBorderCell =
-      new G4LogicalVolume(solidWCExtraBorderCell, 
-			  G4Material::GetMaterial(water),
-			  etbcname, 
-			  0,0,0);
-    //G4cout << *solidWCExtraBorderCell << G4endl;
-
-    G4VPhysicalVolume* physiWCExtraBorderCell =
-      new G4PVPlacement(0,
-                  G4ThreeVector(0.,0.,(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip),
-                  logicWCExtraBorderCell,
-                  etbcname,
-                  logicCapAssembly,
-                  false, 0,
-				          checkOverlaps);
-
-    tmpVisAtt = new G4VisAttributes(G4Colour(1.,0.5,0.5));
-  	tmpVisAtt->SetForceSolid(true);// This line is used to give definition to the cells in OGLSX Visualizer
-  	logicWCExtraBorderCell->SetVisAttributes(tmpVisAtt); 
-    logicWCExtraBorderCell->SetVisAttributes(G4VisAttributes::Invisible);
-    //TF vis.
-
     //---------------------------------------------
     // add blacksheet to this cells
     //--------------------------------------------
@@ -4386,206 +4386,30 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
       towerBSRmin[i] = annulusBlackSheetRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
       towerBSRmax[i] = annulusBlackSheetRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
     }
-    const G4String etbcbsname = etbcname +
-        G4String("BlackSheet");      // "WCExtraTower[Top|Bot]]BorderCellBlackSheet"
-    G4Polyhedra* solidWCExtraBorderBlackSheet = 
-      new G4Polyhedra(etbcbsname,
-			   totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
-			   2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //phi end
-		     1, //NPhi-gon
-			   3,
-			   borderAnnulusZ,
-			   towerBSRmin,
-			   towerBSRmax);
-    G4LogicalVolume* logicWCExtraBorderBlackSheet =
-      new G4LogicalVolume(solidWCExtraBorderBlackSheet,
-			  G4Material::GetMaterial("Blacksheet"),
-			  etbcbsname,
-			    0,0,0);
-
-    G4VPhysicalVolume* physiWCExtraBorderBlackSheet =
-      new G4PVPlacement(0,
-			G4ThreeVector(0.,0.,0.),
-			logicWCExtraBorderBlackSheet,
-			etbcbsname,
-			logicWCExtraBorderCell,
-			false,
-			0,
-			checkOverlaps);
-
-    const G4String etbcwsname = etbcname + G4String("WaterBSSurface");
-    //G4LogicalBorderSurface * WaterBSExtraBorderCellSurface = 
-    new G4LogicalBorderSurface("WaterBSBarrelCellSurface",
-				   physiWCExtraBorderCell,
-				   physiWCExtraBorderBlackSheet, 
-				   OpWaterBSSurface);
-
-    new G4LogicalSkinSurface("BSExtraBorderSkinSurface",logicWCExtraBorderBlackSheet,
-                  BSSkinSurface);
-
-    // These lines add color to the blacksheet in the extratower. If using RayTracer, comment the first chunk and use the second. The Blacksheet should be green.
-  
-    if (Vis_Choice == "RayTracer"){
-    
-      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
-      WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
-      WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
-
-      if(!debugMode)
-        logicWCExtraBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-      else
-        logicWCExtraBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
-    }
-
-    else {
-
-      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
-        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
-
-      if(!debugMode)
-        {logicWCExtraBorderBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);}
-      else
-        {logicWCExtraBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);}
-    }
-
+    // delay blacksheet placement to create holes for intruding PMT if necessary
   }
  //------------------------------------------------------------
  // add caps
  // -----------------------------------------------------------
-  //crucial to match with borderAnnulusZ
-  //need to get correct radius within barrel
-  G4double capZ[5] = { (-WCBlackSheetThickness-1.*mm)*zflip,
-                        0,
-                        (WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius))*zflip,
-                        (WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius))*zflip,
-                        WCBarrelPMTOffset*zflip} ;
-
-  G4double capRmin[5] = {  0. , 0., 0., 0., 0.} ;
-  G4double capRmax[5] = { outerAnnulusRadius + GetRadiusChange(-zflip*WCIDHeight/2), 
-                          outerAnnulusRadius + GetRadiusChange(-zflip*WCIDHeight/2),  
-                          outerAnnulusRadius + GetRadiusChange(-zflip*(WCIDHeight/2-(WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius)))),  
-                          WCIDRadius + GetRadiusChange(-zflip*(WCIDHeight/2-(WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius)))), 
-                          innerAnnulusRadius+ GetRadiusChange(-zflip*(WCIDHeight/2-WCBarrelPMTOffset))};
   const G4String capname = G4String("WC") + capstr;    // "WC[Top|Bot]Cap"
-  G4VSolid* solidWCCap = nullptr;
 
 #ifdef DEBUG
-  G4cout << "B.Q Cap: " << totalAngle << ", " << WCBarrelRingNPhi << ", " << outerAnnulusRadius << ", " << innerAnnulusRadius << ", " << WCBlackSheetThickness << ", " << zflip << ", " << WCBarrelPMTOffset << G4endl;
+  G4cout << "B.Q Cap: " << totalAngle << ", " << WCBarrelRingNPhi << ", " << outerAnnulusRadius << ", " << innerAnnulusRadius << ", " << WCBlackSheetThickness << ", " << zflip << ", " << CapBarrelPMTOffset << G4endl;
 #endif
-
-  if(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal){
-    solidWCCap
-      = new G4Polyhedra(capname,
-			barrelPhiOffset, // phi start
-			totalAngle, //phi end
-			WCBarrelRingNPhi, //NPhi-gon
-			5, // 5 z-planes
-			capZ, //position of the Z planes
-			capRmin, // min radius at the z planes
-			capRmax// max radius at the Z planes
-			);
-  } else {
-    // if there is an extra tower, the cap volume is a union of
-    // to polyhedra. We have to unite both parts, because there are 
-    // PMTs that are on the border between both parts.
-    G4Polyhedra* mainPart 
-      = new G4Polyhedra(capname + G4String("MainPart"),
-      barrelPhiOffset, // phi start
-      totalAngle, //phi end
-      WCBarrelRingNPhi, //NPhi-gon
-      5, // 5 z-planes
-      capZ, //position of the Z planes
-      capRmin, // min radius at the z planes
-      capRmax// max radius at the Z planes
-      );
-    G4double extraCapRmin[5]; 
-    G4double extraCapRmax[5]; 
-    for(int i = 0; i < 5 ; i++){
-      extraCapRmin[i] = capRmin[i] != 0. ?  capRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.) : 0.;
-      extraCapRmax[i] = capRmax[i] != 0. ? capRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.) : 0.;
-    }
-    G4Polyhedra* extraSlice 
-      = new G4Polyhedra(capname + G4String("ExtraSlice"),
-			totalAngle-2.*pi+barrelPhiOffset, // phi start
-			2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //total phi 
-			// fortunately there are no PMTs an the gap!
-			1, //NPhi-gon
-			5, //  z-planes
-			capZ, //position of the Z planes
-			extraCapRmin, // min radius at the z planes
-			extraCapRmax// max radius at the Z planes
-			);
-     solidWCCap =
-        new G4UnionSolid("WCCap", mainPart, extraSlice);
-
-     //G4cout << *solidWCCap << G4endl;
-   
-  }
-  // G4cout << *solidWCCap << G4endl;
-  G4LogicalVolume* logicWCCap = 
-    new G4LogicalVolume(solidWCCap,
-			G4Material::GetMaterial(water),
-			capname + G4String("Polygon"),
-			0,0,0);
-
-  G4VPhysicalVolume* physiWCCap =
-    new G4PVPlacement(0,                           // no rotation
-		      G4ThreeVector(0.,0.,(-capAssemblyHeight/2.+1*mm+WCBlackSheetThickness)*zflip),     // its position
-		      logicWCCap,          // its logical volume
-		      capname,             // its name
-		      logicCapAssembly,                  // its mother volume
-		      false,                       // no boolean operations
-		      0,                          // Copy #
-			  checkOverlaps);
-
-
-  // used for RayTracer
-  if (Vis_Choice == "RayTracer"){
-    if(!debugMode){  
-      tmpVisAtt = new G4VisAttributes(G4Colour(1,0.5,0.5));
-	    tmpVisAtt->SetForceSolid(true);
-      logicWCCap->SetVisAttributes(tmpVisAtt);
-      logicWCCap->SetVisAttributes(G4VisAttributes::Invisible);
-
-    } else{
-    
-      tmpVisAtt = new G4VisAttributes(G4Colour(0.6,0.5,0.5));
-	    tmpVisAtt->SetForceSolid(true);
-      logicWCCap->SetVisAttributes(tmpVisAtt);
-    }
-  }
-
-  // used for OGLSX
-  else{
-    if(!debugMode){  
-
-      tmpVisAtt = new G4VisAttributes(G4Colour(1.,0.5,0.5));
-      tmpVisAtt->SetForceSolid(true);// This line is used to give definition to the cells in OGLSX Visualizer
-      //logicWCCap->SetVisAttributes(tmpVisAtt); 
-      logicWCCap->SetVisAttributes(G4VisAttributes::Invisible);
-    //TF vis.
-
-    } else {
-      tmpVisAtt = new G4VisAttributes(G4Colour(.6,0.5,0.5));
-      tmpVisAtt->SetForceWireframe(true);
-      logicWCCap->SetVisAttributes(tmpVisAtt);
-    }
-  }
 
   //---------------------------------------------------------------------
   // add cap blacksheet
   // -------------------------------------------------------------------
   
-  G4double capBlackSheetZ[4] = {-WCBlackSheetThickness*zflip, 0., 0., (WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius)) *zflip};
+  G4double capBlackSheetZ[4] = {-WCBlackSheetThickness*zflip, 0., 0., (CapBarrelPMTOffset) *zflip};
   G4double capBlackSheetRmin[4] = { 0., 
                                     0., 
                                     WCIDRadius + GetRadiusChange(-zflip*WCIDHeight/2), 
-                                    WCIDRadius + GetRadiusChange(-zflip*(WCIDHeight/2-(WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius))))};
+                                    WCIDRadius + GetRadiusChange(-zflip*(WCIDHeight/2-(CapBarrelPMTOffset)))};
   G4double capBlackSheetRmax[4] = { WCIDRadius+WCBlackSheetThickness + GetRadiusChange(-zflip*WCIDHeight/2), 
                                     WCIDRadius+WCBlackSheetThickness + GetRadiusChange(-zflip*WCIDHeight/2),
 								                    WCIDRadius+WCBlackSheetThickness + GetRadiusChange(-zflip*WCIDHeight/2),
-								                    WCIDRadius+WCBlackSheetThickness + GetRadiusChange(-zflip*(WCIDHeight/2-(WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius))))};
+								                    WCIDRadius+WCBlackSheetThickness + GetRadiusChange(-zflip*(WCIDHeight/2-(CapBarrelPMTOffset)))};
   const G4String capbsname = capname + G4String("BlackSheet");
 
   if(capBlackSheetZ[0] * capBlackSheetZ[3] > 0.) {
@@ -4644,51 +4468,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
     solidWCCapBlackSheet =
       new G4UnionSolid(capbsname, mainPart, extraSlice);
   }
-  G4LogicalVolume* logicWCCapBlackSheet =
-    new G4LogicalVolume(solidWCCapBlackSheet,
-			G4Material::GetMaterial("Blacksheet"),
-			capbsname,
-			0,0,0);
-  G4VPhysicalVolume* physiWCCapBlackSheet =
-    new G4PVPlacement(0,
-                      G4ThreeVector(0.,0.,0.),
-                      logicWCCapBlackSheet,
-                      capbsname,
-                      logicWCCap,
-                      false,
-                      0,
-					  checkOverlaps);
-
-  //G4LogicalBorderSurface * WaterBSBottomCapSurface = 
-	new G4LogicalBorderSurface(capbsname + G4String("WaterBSSurface"),
-								 physiWCCap,physiWCCapBlackSheet,
-								 OpWaterBSSurface);
-  
-  new G4LogicalSkinSurface(capbsname + G4String("BSSkinSurface"),logicWCCapBlackSheet,
-						   BSSkinSurface);
-      
-  // used for OGLSX
-  if (Vis_Choice == "OGLSX"){
-
-    G4VisAttributes* WCCapBlackSheetVisAtt 
-    = new G4VisAttributes(G4Colour(0.9,0.2,0.2));
-  
-    if(!debugMode)
-          logicWCCapBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
-      else
-          logicWCCapBlackSheet->SetVisAttributes(WCCapBlackSheetVisAtt);}
-
-  // used for RayTracer (makes the caps blacksheet yellow)
-  if (Vis_Choice == "RayTracer"){
-
-    G4VisAttributes* WCCapBlackSheetVisAtt 
-    = new G4VisAttributes(G4Colour(1.0,1.0,0.0));
-
-    if(!debugMode)
-        //logicWCCapBlackSheet->SetVisAttributes(G4VisAttributes::Invisible); //Use this line if you want to make the blacksheet on the caps invisible to view through
-      logicWCCapBlackSheet->SetVisAttributes(WCCapBlackSheetVisAtt);
-      else
-          logicWCCapBlackSheet->SetVisAttributes(WCCapBlackSheetVisAtt);}
+  // delay blacksheet placement to create holes for intruding PMT if necessary
 
   //---------------------------------------------------------
   // Add top and bottom PMTs
@@ -4702,135 +4482,34 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
     if(nID_PMTs2<=1) logicWCPMT2 = ConstructPMT(WCPMTName2, WCIDCollectionName2,"tankPMT2",nID_PMTs2);
     else logicWCPMT2 = ConstructMultiPMT(WCPMTName2, WCIDCollectionName2,"tankPMT2",nID_PMTs2);
   }
+  
+  G4LogicalVolume* logicWCExSituMPMT = ConstructExSituMultiPMT(WCPMTName, WCIDCollectionName,"tank");
+  G4LogicalVolume* logicWCInSituMPMT = ConstructInSituMultiPMT(WCPMTName, WCIDCollectionName,"tank");
+  G4LogicalVolume* logicBeamPipe = ConstructBeamPipe(); // WCTE beam pipe
+  G4LogicalVolume* logicCH = ConstructCameraHousing(); // WCTE camera housing
+
+  std::vector<G4LogicalVolume*> vlogicWCPMT(6);
+  vlogicWCPMT[0] = logicWCPMT;
+  vlogicWCPMT[1] = logicWCPMT2;
+  vlogicWCPMT[2] = logicWCExSituMPMT;
+  vlogicWCPMT[3] = logicWCInSituMPMT;
+  vlogicWCPMT[4] = logicBeamPipe;
+  vlogicWCPMT[5] = logicCH;
 
   G4String pmtname = "WCMultiPMT";
- 
-  // If using RayTracer and want to view the detector without caps, comment out the top and bottom PMT's
-  G4double xoffset;
-  G4double yoffset;
-  G4int    icopy = 0;
 
-  // loop over the cap
-  if(placeCapPMTs){
-
-    if (readFromTable)
-    {
-      G4int capSection = (zflip==-1) ? 1 : 3;
-      for (G4int i=0; i<nPMTsRead; i++ )
-      {
-        if (!pmtUse[i]) continue; // skip PMT
-        if (pmtSection[i]!=capSection) continue; // only place cap PMT
-
-        G4RotationMatrix* WCCapPMTRotation = new G4RotationMatrix;
-        //if mPMT: perp to wall
-        if(orientation == PERPENDICULAR){
-          if(zflip==-1){ // rotation for top cap
-            WCCapPMTRotation->rotateY(180.*deg); 
-          }
-        }
-        else if (orientation == VERTICAL)
-        WCCapPMTRotation->rotateY(90.*deg);
-        else if (orientation == HORIZONTAL)
-        WCCapPMTRotation->rotateX(90.*deg);
-
-        xoffset = pmtPos[i].x() + G4RandGauss::shoot(0,pmtPosVar);
-        yoffset = pmtPos[i].y() + G4RandGauss::shoot(0,pmtPosVar);
-        G4cout<<"Cap PMT ID = "<<i<<", Position = "<<pmtPos[i].x()<<" "<<pmtPos[i].y()<<" "<<pmtPos[i].z()<<", Rotation = "<<pmtRotaton[i]<<G4endl;
-        WCCapPMTRotation->rotateZ(pmtRotaton[i]); 
-        G4ThreeVector cellpos = G4ThreeVector(xoffset, yoffset, 0);
-
-#ifdef ACTIVATE_IDPMTS
-        //G4VPhysicalVolume* physiCapPMT =
-        new G4PVPlacement(WCCapPMTRotation,
-                cellpos,                   // its position
-                (hybrid && pmtType[i]==2)?logicWCPMT2:logicWCPMT,                // its logical volume
-                pmtname, // its name 
-                logicWCCap,         // its mother volume
-                false,                 // no boolean os
-                pmtmPMTId[i],               // every PMT need a unique id.
-                checkOverlapsPMT);
-#endif          
-        // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
-        // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
-        // this is still the case.
-        icopy++;
-      }
-    }
-    else
-    {
-
-      G4int CapNCell = WCCapEdgeLimit/WCCapPMTSpacing + 2;
-#ifdef DEBUG
-      G4cout << "Debug B.Q, wccap edge = " << WCCapEdgeLimit << ", spacing = " << WCCapPMTSpacing << ", CapNCell = " << CapNCell << ", PMT radius = " << WCPMTRadius << G4endl;
+  // Union of PMT solids to resolve overlap
+#if G4VERSION_NUMBER < 1072
+  G4MultiUnion_v1072* pmt_solid = new G4MultiUnion_v1072("UnitedPMTs_Cap");
+#else
+  G4MultiUnion* pmt_solid = new G4MultiUnion("UnitedPMTs_Cap");
 #endif
-      for ( int i = -CapNCell ; i <  CapNCell; i++) {
-        for (int j = -CapNCell ; j <  CapNCell; j++)   {
 
-          G4RotationMatrix* WCCapPMTRotation = new G4RotationMatrix;
-          //if mPMT: perp to wall
-          if(orientation == PERPENDICULAR){
-            if(zflip==-1){
-              WCCapPMTRotation->rotateY(180.*deg); 
-            }
-          }
-          else if (orientation == VERTICAL)
-          WCCapPMTRotation->rotateY(90.*deg);
-          else if (orientation == HORIZONTAL)
-          WCCapPMTRotation->rotateX(90.*deg);
-
-          // Jun. 04, 2020 by M.Shinoki
-          // For IWCD (NuPRISM_mPMT Geometry)
-          xoffset = i*WCCapPMTSpacing + WCCapPMTSpacing*0.5 + G4RandGauss::shoot(0,pmtPosVar);
-          yoffset = j*WCCapPMTSpacing + WCCapPMTSpacing*0.5 + G4RandGauss::shoot(0,pmtPosVar);
-          // For WCTE (NuPRISMBeamTest_mPMT Geometry)
-          if (isNuPrismBeamTest || isNuPrismBeamTest_16cShort){
-            xoffset = i*WCCapPMTSpacing + G4RandGauss::shoot(0,pmtPosVar);
-            yoffset = j*WCCapPMTSpacing + G4RandGauss::shoot(0,pmtPosVar);
-          }
-          G4ThreeVector cellpos = G4ThreeVector(xoffset, yoffset, 0);     
-          
-          double dcenter = hybrid?std::max(WCPMTRadius,WCPMTRadius2):WCPMTRadius;
-          dcenter+=sqrt(xoffset*xoffset + yoffset*yoffset);
-          if (dcenter < WCCapEdgeLimit) 
-
-          // for debugging boundary cases: 
-          // &&  ((sqrt(xoffset*xoffset + yoffset*yoffset) + WCPMTRadius) > (WCCapEdgeLimit-100)) ) 
-          {
-            //B.Q for Hybrid
-            G4int horizontalModulo = (i+CapNCell) % WCPMTperCellHorizontal;
-            G4int verticalModulo = (j+CapNCell) % WCPMTperCellVertical;
-#ifdef ACTIVATE_IDPMTS
-            //G4VPhysicalVolume* physiCapPMT =
-              new G4PVPlacement(WCCapPMTRotation,
-                    cellpos,                   // its position
-                    ((horizontalModulo == verticalModulo) && hybrid && WCPMTPercentCoverage2!=0)?logicWCPMT2:logicWCPMT,                // its logical volume
-                    pmtname, // its name 
-                    logicWCCap,         // its mother volume
-                    false,                 // no boolean os
-                    icopy,               // every PMT need a unique id.
-                    checkOverlapsPMT);
-#endif          
-
-          // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
-              // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
-            // this is still the case.
-
-            icopy++;
-          }
-        }
-      }
-    }
-
-
-    G4cout << "total on cap: " << icopy << "\n";
-    G4cout << "Coverage was calculated to be: " << (icopy*WCPMTRadius*WCPMTRadius/(WCIDRadius*WCIDRadius)) << "\n";
-  }//end if placeCapPMTs
-
+  // unique copy number for auto placement
+  G4int copyNo = 0;
   ///////////////   Barrel PMT placement
 
   if(placeBorderPMTs){
-
-    G4int copyNo = 0;
 
     if (readFromTable)
     {
@@ -4861,14 +4540,21 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
         else if(orientation == VERTICAL)
           PMTRotation->rotateY(-dth); 
 
-        G4double newZ = pmtPos[i].z() + (mainAnnulusHeight/2.+barrelCellHeight/2.)*zflip + G4RandGauss::shoot(0,pmtPosVar);
+        G4double newZ = pmtPos[i].z() - capAssemblyZEdge + (barrelCellHeight/2.)*zflip + G4RandGauss::shoot(0,pmtPosVar);
         G4double newR = annulusBlackSheetRmin[1]+(annulusBlackSheetRmin[2]-annulusBlackSheetRmin[1])*(newZ-borderAnnulusZ[1])/(borderAnnulusZ[2]-borderAnnulusZ[1]);
+        if (pmtType[i]==6) // special treatment for camera housing
+        {
+          newR += -pmtDir[i].z()*mm; 
+          newZ = -zflip*(barrelCellHeight/2.+CapBarrelPMTOffset-pmtDir[i].y()*mm);
+        }
+        else newR += pmt_blacksheet_offset;
         G4double newPhi = pmtPhi-phi_offset;
 
         G4ThreeVector PMTPosition =  G4ThreeVector(newR,
               newR*tan(newPhi) + G4RandGauss::shoot(0,pmtPosVar),
-              newZ);
-        PMTRotation->rotateZ(pmtRotaton[i]); 
+              newZ+(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip);
+        if (pmtType[i]==6) PMTRotation->rotateY(pmtRotaton[i]);
+        else PMTRotation->rotateZ(pmtRotaton[i]); 
         G4cout<<"Border ring PMT ID = "<<i<<", Position = "<<pmtPos[i].x()<<" "<<pmtPos[i].y()<<" "<<pmtPos[i].z()<<", Rotation = "<<pmtRotaton[i]<<G4endl;
 
         PMTPosition.rotateZ(phi_offset);  // align with the symmetry axes of the cell 
@@ -4877,9 +4563,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
         //G4VPhysicalVolume* physiWCBarrelBorderPMT =
         new G4PVPlacement(PMTRotation,                      // its rotation
                 PMTPosition,
-                (hybrid && pmtType[i]==2)?logicWCPMT2:logicWCPMT,                // its logical volume
-                pmtname,             // its name
-                !inExtraTower ? logicWCBarrelBorderRing : logicWCExtraBorderCell,         // its mother volume
+                vlogicWCPMT[pmtType[i]-1],                // its logical volume
+                pmtType[i]==6 ? "CameraHousing" : pmtname, // its name
+                logicCapAssembly,         // its mother volume
                 false,                     // no boolean operations
                 pmtmPMTId[i],
                 checkOverlapsPMT); 
@@ -4888,6 +4574,10 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
         // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
         // this is still the case.
         copyNo++;
+
+        G4VSolid* solidNode = vlogicWCPMT[pmtType[i]-1]->GetSolid() ;
+        G4Transform3D tr(PMTRotation->inverse(), PMTPosition);
+        pmt_solid->AddNode( *solidNode, tr );
       }
     }
     else
@@ -4926,7 +4616,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
                   (-barrelCellHeight/2.+(j+0.5)*verticalSpacing)*zflip + G4RandGauss::shoot(0,pmtPosVar));
 
             G4double newR = annulusBlackSheetRmin[1]+(annulusBlackSheetRmin[2]-annulusBlackSheetRmin[1])*(PMTPosition.z()-borderAnnulusZ[1])/(borderAnnulusZ[2]-borderAnnulusZ[1]);
+            newR += pmt_blacksheet_offset;
             PMTPosition.setX(newR);
+            PMTPosition.setZ(PMTPosition.z()+(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip);
 
             PMTPosition.rotateZ(phi_offset);  // align with the symmetry axes of the cell 
 #ifdef ACTIVATE_IDPMTS
@@ -4938,7 +4630,7 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
                     PMTPosition,
                     (i==j && hybrid && WCPMTPercentCoverage2!=0)?logicWCPMT2:logicWCPMT,                // its logical volume
                     pmtname,             // its name
-                    logicWCBarrelBorderRing,         // its mother volume
+                    logicCapAssembly,         // its mother volume
                     false,                     // no boolean operations
                     copyNo++,
                     checkOverlapsPMT); 
@@ -4946,6 +4638,11 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
             // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
             // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
             // this is still the case.
+
+            G4VSolid* solidNode = (i==j && hybrid && WCPMTPercentCoverage2!=0) ? logicWCPMT2->GetSolid() :
+                                                          logicWCPMT->GetSolid() ;
+            G4Transform3D tr(PMTRotation->inverse(), PMTPosition);
+            pmt_solid->AddNode( *solidNode, tr );
           }
         }
       }
@@ -4987,7 +4684,9 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
                       (-barrelCellHeight/2.+(j+0.5)*verticalSpacing)*zflip + G4RandGauss::shoot(0,pmtPosVar));
 
             G4double newR = towerBSRmin[1]+(towerBSRmin[2]-towerBSRmin[1])*(PMTPosition.z()-borderAnnulusZ[1])/(borderAnnulusZ[2]-borderAnnulusZ[1]);
+            newR += pmt_blacksheet_offset;
             PMTPosition.setX(newR);
+            PMTPosition.setZ(PMTPosition.z()+(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip);
 
             PMTPosition.rotateZ(-(2*pi-totalAngle)/2.+barrelPhiOffset); // align with the symmetry axes of the cell 
 #ifdef ACTIVATE_IDPMTS
@@ -4999,14 +4698,19 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
                     PMTPosition,
                     (i==j && hybrid && WCPMTPercentCoverage2!=0)?logicWCPMT2:logicWCPMT,                // its logical volume
                     pmtname,             // its name
-                    logicWCExtraBorderCell,         // its mother volume
+                    logicCapAssembly,         // its mother volume
                     false,                     // no boolean operations
-                    i*WCPMTperCellVertical+j,
+                    copyNo++,
                     checkOverlapsPMT);
 #endif
               // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
               // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
               // this is still the case.
+            
+            G4VSolid* solidNode = (i==j && hybrid && WCPMTPercentCoverage2!=0) ? logicWCPMT2->GetSolid() :
+                                                          logicWCPMT->GetSolid() ;
+            G4Transform3D tr(PMTRotation->inverse(), PMTPosition);
+            pmt_solid->AddNode( *solidNode, tr );
           }
         }
       
@@ -5014,270 +4718,332 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructCapsNoReplica(G4bool flipz)
     }
   }//end if placeBorderPMTs
 
-  // # -------------------------------------- #
-  // ##########################################
-  // # Prototype Outer-Detector OD Hyper-K HK #
-  // ##########################################
-  // # -------------------------------------- #
+  // If using RayTracer and want to view the detector without caps, comment out the top and bottom PMT's
+  G4double xoffset;
+  G4double yoffset;
+  G4int    icopy = 0;
+  // loop over the cap
+  if(placeCapPMTs){
 
-  if(isODConstructed){
-
-    G4double sphereRadius =
-	  (WCPMTODExposeHeight*WCPMTODExposeHeight+ WCPMTODRadius*WCPMTODRadius)/(2*WCPMTODExposeHeight);
-    WCODRadius = outerAnnulusRadius - sphereRadius;
-
-    //-------------------------------------------------------------
-    // OD Tyvek Barrel side
-    // ------------------------------------------------------------
-    G4double annulusODTyvekRmax[2] = {WCODRadius,
-                                      WCODRadius};
-    G4double annulusODTyvekRmin[2] = {WCODRadius-WCODTyvekSheetThickness,
-                                      WCODRadius-WCODTyvekSheetThickness};
-    G4double RingZ[2] = {borderAnnulusZ[0], borderAnnulusZ[2]};
-
-    const G4String bbodtname = bbrname +
-        G4String("ODTyvek"); // "WCBarrel[Top|Bot]BorderRingODTyvek"
-    G4Polyhedra* solidWCBarrelBorderODTyvek =
-        new G4Polyhedra(bbodtname,
-		        barrelPhiOffset, // phi start
-			      totalAngle, //total phi
-			      WCBarrelRingNPhi, //NPhi-gon
-            2,
-            RingZ,
-            annulusODTyvekRmin,
-            annulusODTyvekRmax);
-
-    G4LogicalVolume* logicWCBarrelBorderODTyvek =
-	  new G4LogicalVolume(solidWCBarrelBorderODTyvek,
-			      G4Material::GetMaterial("Tyvek"),
-	                      bbodtname,
-			      0,0,0);
-
-    new G4LogicalSkinSurface(bbodtname + G4String("WaterTySurface"),
-                             logicWCBarrelBorderODTyvek,
-                             OpWaterTySurface);
-
-    G4VisAttributes* WCBarrelODTyvekCellVisAtt =
-	  new G4VisAttributes(yellow);
-    WCBarrelODTyvekCellVisAtt->SetForceWireframe(true);
-    WCBarrelODTyvekCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
-
-    logicWCBarrelBorderODTyvek->SetVisAttributes(G4VisAttributes::Invisible);
-    //// Uncomment following for TYVEK visualization
-    logicWCBarrelBorderODTyvek->SetVisAttributes(WCBarrelODTyvekCellVisAtt);
-
-    //G4VPhysicalVolume* physiWCBarrelBorderCellODTyvek =
-	  new G4PVPlacement(0,
-					  G4ThreeVector(0.,0.,0.),
-					  logicWCBarrelBorderODTyvek,
-					  bbodtname,
-					  logicWCBarrelBorderRing,
-					  false,
-					  0,
-					  checkOverlaps);
-
-    // OD Tyvek around the ID cap
-    G4VSolid* solidWCODCapTyvek = nullptr;
-    G4double odCapZ[2] = {
-      (-WCBlackSheetThickness-1.*mm)*zflip,
-      (WCBarrelPMTOffset - (WCIDRadius-innerAnnulusRadius)) *zflip};
-    if(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal){
-      solidWCODCapTyvek
-      = new G4Polyhedra(capname + G4String("Tyvek"),
-                barrelPhiOffset, // phi start
-                totalAngle, //phi end
-                WCBarrelRingNPhi, //NPhi-gon
-                2, // 2 z-planes
-                odCapZ, //position of the Z planes
-                annulusODTyvekRmin, // min radius at the z planes
-                annulusODTyvekRmax// max radius at the Z planes
-                );
-    } else {
-      // if there is an extra tower, the cap volume is a union of
-      // to polyhedra. We have to unite both parts, because there are 
-      // PMTs that are on the border between both parts.
-      G4Polyhedra* mainPart 
-      = new G4Polyhedra(capname + G4String("TyvekMainPart"),
-                barrelPhiOffset, // phi start
-                totalAngle, //phi end
-                WCBarrelRingNPhi, //NPhi-gon
-                2, // 2 z-planes
-                odCapZ, //position of the Z planes
-                annulusODTyvekRmin, // min radius at the z planes
-                annulusODTyvekRmax// max radius at the Z planes
-                );
-      G4double extraCapRmin[2]; 
-      G4double extraCapRmax[2]; 
-      for(int i = 0; i < 2 ; i++){
-        extraCapRmin[i] = annulusODTyvekRmin[i] != 0. ? annulusODTyvekRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.) : 0.;
-        extraCapRmax[i] = annulusODTyvekRmax[i] != 0. ? annulusODTyvekRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.) : 0.;
-      }
-      G4Polyhedra* extraSlice 
-      = new G4Polyhedra(capname + G4String("TyvekExtraSlice"),
-                totalAngle-2.*pi+barrelPhiOffset, // phi start
-                2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //total phi 
-                // fortunately there are no PMTs an the gap!
-                1, //NPhi-gon
-                2, //  z-planes
-                odCapZ, //position of the Z planes
-                extraCapRmin, // min radius at the z planes
-                extraCapRmax// max radius at the Z planes
-                );
-      solidWCODCapTyvek =
-      new G4UnionSolid(capname + G4String("Tyvek"), mainPart, extraSlice);
-    }
-
-    G4LogicalVolume* logicWCODCapTyvek = 
-      new G4LogicalVolume(solidWCODCapTyvek,
-                G4Material::GetMaterial("Tyvek"),
-                capname + G4String("TyvekPolygon"),
-                0,0,0);
-
-      new G4PVPlacement(0,                           // no rotation
-              G4ThreeVector(0.,0.,0.),     // its position
-              logicWCODCapTyvek,          // its logical volume
-              capname + G4String("Tyvek"),             // its name
-              logicWCCap,                  // its mother volume
-              false,                       // no boolean operations
-              0,                          // Copy #
-              checkOverlaps);
-    
-    new G4LogicalSkinSurface(capname + G4String("WaterTySurface"),
-                              logicWCODCapTyvek,
-                              OpWaterTySurface);
-
-    logicWCODCapTyvek->SetVisAttributes(G4VisAttributes::Invisible);
-    //// Uncomment following for TYVEK visualization
-    logicWCODCapTyvek->SetVisAttributes(WCBarrelODTyvekCellVisAtt);
-
-    //-------------------------------------------------------------
-    // OD BARREL PMTs
-    // ------------------------------------------------------------
-
-    ///////////////   Barrel PMT placement
-    G4double barrelCellWidth = 2.*WCIDRadius*tan(dPhi/2.);
-    const G4double barrelODCellWidth   = 2.*WCODRadius*tan(dPhi/2.);
-    const G4double barrelODCellHeight  = barrelCellHeight * (barrelODCellWidth/barrelCellWidth);
-    G4double horizontalODSpacing = barrelODCellWidth/WCPMTODperCellHorizontal;
-    const G4double verticalODSpacing   = barrelODCellHeight / WCPMTODperCellVertical;
-
-    G4int odcopyNo = 0;
-    for (int iphi=0;iphi<WCBarrelRingNPhi;iphi++)
+    if (readFromTable)
     {
-      G4double phi_offset = (iphi+0.5)*dPhi+barrelPhiOffset;
+      G4int capSection = (zflip==-1) ? 1 : 3;
+      for (G4int i=0; i<nPMTsRead; i++ )
+      {
+        if (!pmtUse[i]) continue; // skip PMT
+        if (pmtSection[i]!=capSection) continue; // only place cap PMT
 
-      G4RotationMatrix* WCPMTODRotation = new G4RotationMatrix;
-      WCPMTODRotation->rotateY(270.*deg);
-      WCPMTODRotation->rotateX(phi_offset);//align the PMT with the Cell
+        G4RotationMatrix* WCCapPMTRotation = new G4RotationMatrix;
+        //if mPMT: perp to wall
+        if(orientation == PERPENDICULAR){
+          if(zflip==-1){ // rotation for top cap
+            WCCapPMTRotation->rotateY(180.*deg); 
+          }
+        }
+        else if (orientation == VERTICAL)
+        WCCapPMTRotation->rotateY(90.*deg);
+        else if (orientation == HORIZONTAL)
+        WCCapPMTRotation->rotateX(90.*deg);
 
-      for(G4long i = 0; i < WCPMTODperCellHorizontal; i++){
-        for(G4long j = 0; j < WCPMTODperCellVertical; j++){
+        xoffset = pmtPos[i].x() + G4RandGauss::shoot(0,pmtPosVar);
+        yoffset = pmtPos[i].y() + G4RandGauss::shoot(0,pmtPosVar);
+        G4cout<<"Cap PMT ID = "<<i<<", Position = "<<pmtPos[i].x()<<" "<<pmtPos[i].y()<<" "<<pmtPos[i].z()<<", Rotation = "<<pmtRotaton[i]<<G4endl;
+        WCCapPMTRotation->rotateZ(pmtRotaton[i]); 
+        G4ThreeVector cellpos = G4ThreeVector(xoffset, yoffset, (-capAssemblyHeight/2.+1*mm+WCBlackSheetThickness)*zflip);
 
-          G4cout << "Adding OD PMT in barrel in iphi "<< iphi << " cell" << i << ", " << j << G4endl;
+#ifdef ACTIVATE_IDPMTS
+        //G4VPhysicalVolume* physiCapPMT =
+        new G4PVPlacement(WCCapPMTRotation,
+                cellpos,                   // its position
+                vlogicWCPMT[pmtType[i]-1],                // its logical volume
+                pmtname, // its name 
+                logicCapAssembly,         // its mother volume
+                false,                 // no boolean os
+                pmtmPMTId[i],               // every PMT need a unique id.
+                checkOverlapsPMT);
+#endif          
+        // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
+        // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
+        // this is still the case.
+        icopy++;
 
-          G4ThreeVector Container =  G4ThreeVector(WCODRadius,
-                                                  -barrelODCellWidth/2.+(i+0.5)*horizontalODSpacing+((G4int)(std::pow(-1,j))*(G4int)(WCODPMTShift)/2),
-                                                  (-(barrelCellHeight * (barrelODCellWidth/barrelCellWidth))/2.+(j+0.5)*verticalODSpacing)*zflip);
+        G4VSolid* solidNode = vlogicWCPMT[pmtType[i]-1]->GetSolid() ;
+        G4Transform3D tr(WCCapPMTRotation->inverse(), cellpos);
+        pmt_solid->AddNode( *solidNode, tr );
+      }
+    }
+    else
+    {
 
-          Container.rotateZ(phi_offset);  // align with the symmetry axes of the cell 
+      G4int CapNCell = WCCapEdgeLimit/WCCapPMTSpacing + 2;
+#ifdef DEBUG
+      G4cout << "Debug B.Q, wccap edge = " << WCCapEdgeLimit << ", spacing = " << WCCapPMTSpacing << ", CapNCell = " << CapNCell << ", PMT radius = " << WCPMTRadius << G4endl;
+#endif
+      for ( int i = -CapNCell ; i <  CapNCell; i++) {
+        for (int j = -CapNCell ; j <  CapNCell; j++)   {
 
-              //G4VPhysicalVolume* physiWCBarrelWLSPlate =
-          new G4PVPlacement(WCPMTODRotation,           // its rotation
-                    Container,
-                    logicWCODWLSAndPMT,         // its logical volume
-                    "WCBorderCellODContainer",  // its name
-                    logicWCBarrelBorderRing,         // its mother volume
-                    false,                     // no boolean operations
-                    odcopyNo++,
+          G4RotationMatrix* WCCapPMTRotation = new G4RotationMatrix;
+          //if mPMT: perp to wall
+          if(orientation == PERPENDICULAR){
+            if(zflip==-1){
+              WCCapPMTRotation->rotateY(180.*deg); 
+            }
+          }
+          else if (orientation == VERTICAL)
+          WCCapPMTRotation->rotateY(90.*deg);
+          else if (orientation == HORIZONTAL)
+          WCCapPMTRotation->rotateX(90.*deg);
+
+          // Jun. 04, 2020 by M.Shinoki
+          // For IWCD (NuPRISM_mPMT Geometry)
+          xoffset = i*WCCapPMTSpacing + WCCapPMTSpacing*0.5 + G4RandGauss::shoot(0,pmtPosVar);
+          yoffset = j*WCCapPMTSpacing + WCCapPMTSpacing*0.5 + G4RandGauss::shoot(0,pmtPosVar);
+          // For WCTE (NuPRISMBeamTest_mPMT Geometry)
+          if (isNuPrismBeamTest || isNuPrismBeamTest_16cShort){
+            xoffset = i*WCCapPMTSpacing + G4RandGauss::shoot(0,pmtPosVar);
+            yoffset = j*WCCapPMTSpacing + G4RandGauss::shoot(0,pmtPosVar);
+          }
+          G4ThreeVector cellpos = G4ThreeVector(xoffset, yoffset, (-capAssemblyHeight/2.+1*mm+WCBlackSheetThickness)*zflip);     
+          
+          double dcenter = hybrid?std::max(WCPMTRadius,WCPMTRadius2):WCPMTRadius;
+          dcenter+=sqrt(xoffset*xoffset + yoffset*yoffset);
+          if (dcenter < WCCapEdgeLimit) 
+
+          // for debugging boundary cases: 
+          // &&  ((sqrt(xoffset*xoffset + yoffset*yoffset) + WCPMTRadius) > (WCCapEdgeLimit-100)) ) 
+          {
+            //B.Q for Hybrid
+            G4int horizontalModulo = (i+CapNCell) % WCPMTperCellHorizontal;
+            G4int verticalModulo = (j+CapNCell) % WCPMTperCellVertical;
+#ifdef ACTIVATE_IDPMTS
+            //G4VPhysicalVolume* physiCapPMT =
+              new G4PVPlacement(WCCapPMTRotation,
+                    cellpos,                   // its position
+                    ((horizontalModulo == verticalModulo) && hybrid && WCPMTPercentCoverage2!=0)?logicWCPMT2:logicWCPMT,                // its logical volume
+                    pmtname, // its name 
+                    logicCapAssembly,         // its mother volume
+                    false,                 // no boolean os
+                    copyNo++,               // every PMT need a unique id.
                     checkOverlapsPMT);
+#endif          
 
+          // logicWCPMT->GetDaughter(0),physiCapPMT is the glass face. If you add more 
+              // daugter volumes to the PMTs (e.g. a acryl cover) you have to check, if
+            // this is still the case.
+
+            icopy++;
+
+            G4VSolid* solidNode = ((horizontalModulo == verticalModulo) && hybrid && WCPMTPercentCoverage2!=0) ? logicWCPMT2->GetSolid() :
+                                                          logicWCPMT->GetSolid() ;
+            G4Transform3D tr(WCCapPMTRotation->inverse(), cellpos);
+            pmt_solid->AddNode( *solidNode, tr );
+          }
         }
       }
     }
 
-    if(!(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal)){
 
-      // TYVEK
-      G4double towerODTyvekRmin[2];
-      G4double towerODTyvekRmax[2];
-      for(int i = 0; i < 2; i++){
-        towerODTyvekRmin[i] = annulusODTyvekRmin[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
-        towerODTyvekRmax[i] = annulusODTyvekRmax[i]/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.);
-      }
-      const G4String etbcodtname = etbcname +
-        G4String("ODTyvek"); // "WCExtraTower[Top|Bot]]BorderCellODTyvek"
-      G4Polyhedra* solidWCExtraBorderCellODTyvek =
-        new G4Polyhedra(etbcodtname,
-                        totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
-                        2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //phi end
-                        1, //NPhi-gon
-                        2,
-                        RingZ,
-                        towerODTyvekRmin,
-                        towerODTyvekRmax);
+    G4cout << "total on cap: " << icopy << "\n";
+    G4cout << "Coverage was calculated to be: " << (icopy*WCPMTRadius*WCPMTRadius/(WCIDRadius*WCIDRadius)) << "\n";
+  }//end if placeCapPMTs
 
-      G4LogicalVolume* logicWCExtraBorderCellODTyvek =
-	new G4LogicalVolume(solidWCExtraBorderCellODTyvek,
-                            G4Material::GetMaterial("Tyvek"),
-                            etbcodtname,
-                            0,0,0);
+  // create holes in blacksheet and do placement
+  pmt_solid -> Voxelize();
 
-      new G4LogicalSkinSurface(etbcodtname + G4String("WaterTySurface"),
-                               logicWCExtraBorderCellODTyvek,
-                               OpWaterTySurface);
+  G4SubtractionSolid *solidWCBarrelBlackSheet_wHole = new G4SubtractionSolid("solidWCBarrelBlackSheet_wHole", solidWCBarrelBlackSheet, pmt_solid, 0, 
+                                                                          G4ThreeVector(0.,0.,-(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip));
 
-      logicWCExtraBorderCellODTyvek->SetVisAttributes(G4VisAttributes::Invisible);
-      //// Uncomment following for TYVEK visualization
-      logicWCExtraBorderCellODTyvek->SetVisAttributes(WCBarrelODTyvekCellVisAtt);
+  G4LogicalVolume* logicWCBarrelBorderBlackSheet =
+    new G4LogicalVolume(solidWCBarrelBlackSheet_wHole,
+                        G4Material::GetMaterial("Blacksheet"),
+                        bbbsname,
+                        0,0,0);
 
-      //G4VPhysicalVolume* physiWCExtraBorderODTyvek =
-	  new G4PVPlacement(0,
-						G4ThreeVector(0.,0.,0.),
-						logicWCExtraBorderCellODTyvek,
-						etbcodtname,
-						logicWCExtraBorderCell,
-						false,
-						0,
-						checkOverlaps);
+  //G4VPhysicalVolume* physiWCBarrelBorderBlackSheet =
+    new G4PVPlacement(0,
+                      G4ThreeVector(0.,0.,(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip),
+                      logicWCBarrelBorderBlackSheet,
+                      bbbsname,
+                      logicCapAssembly,
+                      false,
+                      0,
+                      checkOverlaps);
+   
+  new G4LogicalSkinSurface("BSBarrelBorderSkinSurface",logicWCBarrelBorderBlackSheet,
+							BSSkinSurface);
 
-      // barrelODCellWidth and barrelODCellHeight are identical to those for normal cell
+  // Change made here to have the if statement contain the !debugmode to be consistent
+  // This code gives the Blacksheet its color. 
 
-      G4RotationMatrix* WCExtraODPMTRotation = new G4RotationMatrix;
-      WCExtraODPMTRotation->rotateY(270.*deg);
-      WCExtraODPMTRotation->rotateX(2*pi - (2*pi-totalAngle)/2.+barrelPhiOffset);//align the PMT with the Cell
+  if (Vis_Choice == "RayTracer"){
 
-      G4double towerWidthOD = WCODRadius*tan(2*pi-totalAngle);
-      // We don't want the same number of OD PMTs squished horizontally so we scale down the horizontal PMTs by the width of the extra tower
-      G4double ratioOfWidths = (double)(WCPMTODperCellHorizontal)*(towerWidthOD/barrelODCellWidth);
-      G4long WCPMTODperCellHorizontalExtra = std::lround(ratioOfWidths);
-      G4double horizontalODSpacingExtra   = towerWidthOD/(double)WCPMTODperCellHorizontalExtra;
-      // verticalODSpacing is identical to that of a normal cell
+    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+      = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
+    WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
+	  WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
+    if(!debugMode)
+    {
+      logicWCBarrelBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
+    }
+    else
+    {
+      logicWCBarrelBorderBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
+    }
+  }
 
+  else {
 
-      for(G4long i = 0; i < (WCPMTODperCellHorizontalExtra); i++){
-        for(G4long j = 0; j < WCPMTODperCellVertical; j++){
-          G4ThreeVector Container =  G4ThreeVector((WCODRadius)/cos(dPhi/2.)*cos((2.*pi-totalAngle)/2.),
-												   -towerWidthOD/2.+(i+0.5)*horizontalODSpacingExtra,
-												   (-(barrelCellHeight * (WCODRadius/WCIDRadius))/2.+(j+0.5)*verticalODSpacing)*zflip);
-          Container.rotateZ(-(2*pi-totalAngle)/2.+barrelPhiOffset); // align with the symmetry
+    G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+      = new G4VisAttributes(G4Colour(0.2,0.9,0.2));
+    if(!debugMode)
+    {
+      logicWCBarrelBorderBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
+    }
+    else
+    {
+      logicWCBarrelBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
+    }
+  }
 
-		  G4cout << "Adding OD PMT in extra tower in cell" << i << ", " << j << G4endl;
-          //G4VPhysicalVolume* physiWCBarrelPMT =
-		  new G4PVPlacement(WCExtraODPMTRotation,             // its rotation
-							Container,
-							logicWCODWLSAndPMT,                // its logical volume
-							"WCExtraBorderCellODContainer",             // its name
-							logicWCExtraBorderCell,         // its mother volume
-							false,                     // no boolean operations
-							i*WCPMTODperCellVertical+j,
-							checkOverlapsPMT);
+  if(!(WCBarrelRingNPhi*WCPMTperCellHorizontal == WCBarrelNumPMTHorizontal))
+  {
+    G4Polyhedra* solidWCExtraBorderBlackSheet = 
+      new G4Polyhedra(etbcbsname,
+			   totalAngle-2.*pi+barrelPhiOffset,//+dPhi/2., // phi start
+			   2.*pi -  totalAngle -G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()/(10.*m), //phi end
+		     1, //NPhi-gon
+			   3,
+			   borderAnnulusZ,
+			   towerBSRmin,
+			   towerBSRmax);
 
-        }
-      }
+    G4SubtractionSolid *solidWCExtraBorderBlackSheet_wHole = new G4SubtractionSolid("solidWCExtraBorderBlackSheet_wHole", solidWCExtraBorderBlackSheet, pmt_solid, 0, 
+                                                                          G4ThreeVector(0.,0.,-(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip));
 
+    G4LogicalVolume* logicWCExtraBorderBlackSheet =
+      new G4LogicalVolume(solidWCExtraBorderBlackSheet_wHole,
+			  G4Material::GetMaterial("Blacksheet"),
+			  etbcbsname,
+			    0,0,0);
+
+    // G4VPhysicalVolume* physiWCExtraBorderBlackSheet =
+      new G4PVPlacement(0,
+			G4ThreeVector(0.,0.,(capAssemblyHeight/2.- barrelCellHeight/2.)*zflip),
+			logicWCExtraBorderBlackSheet,
+			etbcbsname,
+			logicCapAssembly,
+			false,
+			0,
+			checkOverlaps);
+
+    new G4LogicalSkinSurface("BSExtraBorderSkinSurface",logicWCExtraBorderBlackSheet,
+                  BSSkinSurface);
+
+    // These lines add color to the blacksheet in the extratower. If using RayTracer, comment the first chunk and use the second. The Blacksheet should be green.
+  
+    if (Vis_Choice == "RayTracer"){
+    
+      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
+      WCBarrelBlackSheetCellVisAtt->SetForceSolid(true); // force the object to be visualized with a surface
+      WCBarrelBlackSheetCellVisAtt->SetForceAuxEdgeVisible(true); // force auxiliary edges to be shown
+
+      if(!debugMode)
+        logicWCExtraBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
+      else
+        logicWCExtraBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);
     }
 
-  } // END isODConstructed
+    else {
+
+      G4VisAttributes* WCBarrelBlackSheetCellVisAtt 
+        = new G4VisAttributes(G4Colour(0.2,0.9,0.2)); // green color
+
+      if(!debugMode)
+        {logicWCExtraBorderBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);}
+      else
+        {logicWCExtraBorderBlackSheet->SetVisAttributes(WCBarrelBlackSheetCellVisAtt);}
+    }
+  }
+
+  G4SubtractionSolid *solidWCCapBlackSheet_wHole = 
+    new G4SubtractionSolid("solidWCCapBlackSheet_wHole", solidWCCapBlackSheet, pmt_solid, 0, G4ThreeVector(0.,0.,-(-capAssemblyHeight/2.+1*mm+WCBlackSheetThickness+pmt_blacksheet_offset)*zflip)) ;
+
+  G4LogicalVolume* logicWCCapBlackSheet =
+    new G4LogicalVolume(solidWCCapBlackSheet_wHole,
+      G4Material::GetMaterial("Blacksheet"),
+      capbsname,
+      0,0,0);
+  //G4VPhysicalVolume* physiWCCapBlackSheet =
+    new G4PVPlacement(0,
+                      G4ThreeVector(0.,0.,(-capAssemblyHeight/2.+1*mm+WCBlackSheetThickness+pmt_blacksheet_offset)*zflip),
+                      logicWCCapBlackSheet,
+                      capbsname,
+                      logicCapAssembly,
+                      false,
+                      0,
+            checkOverlaps);
+
+  new G4LogicalSkinSurface(capbsname + G4String("BSSkinSurface"),logicWCCapBlackSheet,
+						   BSSkinSurface);
+      
+  // used for OGLSX
+  if (Vis_Choice == "OGLSX"){
+
+    G4VisAttributes* WCCapBlackSheetVisAtt 
+    = new G4VisAttributes(G4Colour(0.9,0.2,0.2));
+
+    if(!debugMode)
+      logicWCCapBlackSheet->SetVisAttributes(G4VisAttributes::Invisible);
+    else
+      logicWCCapBlackSheet->SetVisAttributes(WCCapBlackSheetVisAtt);}
+
+  // used for RayTracer (makes the caps blacksheet yellow)
+  if (Vis_Choice == "RayTracer"){
+
+    G4VisAttributes* WCCapBlackSheetVisAtt 
+    = new G4VisAttributes(G4Colour(1.0,1.0,0.0));
+
+    if(!debugMode)
+      //logicWCCapBlackSheet->SetVisAttributes(G4VisAttributes::Invisible); //Use this line if you want to make the blacksheet on the caps invisible to view through
+      logicWCCapBlackSheet->SetVisAttributes(WCCapBlackSheetVisAtt);
+    else
+      logicWCCapBlackSheet->SetVisAttributes(WCCapBlackSheetVisAtt);}
+
+  // Add CDS CAD model in WCTE
+  if (isNuPrismBeamTest_16cShort && addCDS && !flipz) // bottom cap instead of top cap, because we have rotation later
+  {
+    auto shape_CDS = CADMesh::TessellatedMesh::FromSTL(CDSFile);
+
+    // set scale
+    shape_CDS->SetScale(1);
+    double cds_z_offset = capAssemblyZEdge-capAssemblyHeight/2.; // logicBottomCapAssembly placement
+    cds_z_offset += -capAssemblyHeight/2.+1*mm+WCBlackSheetThickness + pmt_blacksheet_offset; // logicWCCap placement
+    cds_z_offset += -94*mm; // ad-hoc value to place CDS close to endcap blacksheet but not overlapping
+    G4ThreeVector posCDS = G4ThreeVector(0*m, 0*m,cds_z_offset);
+    
+    // make new shape a solid
+    G4VSolid* solid_CDS = shape_CDS->GetSolid();
+    
+    G4LogicalVolume* CDS_logical =                                   //logic name
+    new G4LogicalVolume(solid_CDS,                                 //solid name
+              G4Material::GetMaterial("StainlessSteel"),          //material
+              "CDS");                                     //objects name
+    // rotate if necessary
+    G4RotationMatrix* CDS_rot = new G4RotationMatrix; // Rotates X and Z axes only
+    CDS_rot->rotateX(270*deg);                 
+    CDS_rot->rotateY(315*deg);
+    
+    new G4PVPlacement(CDS_rot,                       //rotation
+              posCDS,                    //at position
+              CDS_logical,           //its logical volume
+              "CDS",                //its name
+              logicCapAssembly,                //its mother  volume
+              false,                   //no boolean operation
+              0,                       //copy number
+              checkOverlaps);          //overlaps checking
+    new G4LogicalSkinSurface("CDSSurface",CDS_logical,ReflectorSkinSurface);
+  }
 
   return logicCapAssembly;
 

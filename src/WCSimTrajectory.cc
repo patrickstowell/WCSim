@@ -67,8 +67,10 @@ WCSimTrajectory::WCSimTrajectory(const G4Track* aTrack)
       const G4VProcess* tempproc = aTrack->GetCreatorProcess();
       creatorProcess = tempproc->GetProcessName();
     }
-  else 
-    creatorProcess = "";
+  else {
+    // must be a primary particle
+    creatorProcess = "initial";
+  }
   savePhotonTrack = false;
 
   boundaryPoints.clear();
@@ -258,8 +260,9 @@ void WCSimTrajectory::AppendStep(const G4Step* aStep)
     G4String thePostPVName = thePostPV->GetName();
     BoundaryType_t ty = kNull;
     if (thePrePVName.contains("BlackSheet") || thePostPVName.contains("BlackSheet")) ty = kBlackSheet;
-    else if (thePrePVName.contains("Cave") || thePostPVName.contains("Cave")) ty = kCave;
-    else if (thePrePVName.contains("Tyvek") || thePostPVName.contains("Tyvek")) ty = kTyvek;
+    else if (thePrePVName.contains("Dome") || thePostPVName.contains("Dome")) ty = kMPMT;
+    else if (thePrePVName.contains("Cave") || thePostPVName.contains("Cave")) ty = kOuterTyvek;
+    else if (thePrePVName.contains("Tyvek") || thePostPVName.contains("Tyvek")) ty = kInnerTyvek;
     if (ty!=kNull)
     {
       const G4Track* track       = aStep->GetTrack();

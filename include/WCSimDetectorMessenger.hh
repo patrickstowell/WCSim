@@ -36,6 +36,8 @@ class WCSimDetectorMessenger: public G4UImessenger
   G4UIcmdWithAString* PMTConfig;
   G4UIcmdWithAString* WCVisChoice;
   G4UIcmdWithAString* PMTGeomDetails;
+  G4UIcmdWithABool*   BGOPlacement;
+  G4UIcmdWith3VectorAndUnit* BGOPosition;
   G4UIcmdWithAString* PMTSize;
   G4UIcmdWithAString* PMTSize2;
   G4UIcmdWithAString* SavePi0;
@@ -83,12 +85,14 @@ class WCSimDetectorMessenger: public G4UImessenger
   G4UIcmdWithADoubleAndUnit* SetDetectorVerticalPosition;
   G4UIcmdWithADoubleAndUnit* SetDetectorDiameter;
   G4UIcmdWithABool* RotateBarrelHalfTower;
+  G4UIcmdWithAString* SetCDSFile;
 
   //PMT placement commands
   G4UIcmdWithABool* UseReplica;
   G4UIcmdWithADoubleAndUnit* PMTPosVar;
   G4UIcmdWith3VectorAndUnit* TankRadiusChange;
   G4UIcmdWithAString* SetPMTPositionInput;
+  G4UIcmdWithAString* SetODPMTPositionInput;
   // OD Geometry
   G4UIcmdWithADoubleAndUnit* ODLateralWaterDepth;
   G4UIcmdWithADoubleAndUnit* ODHeightWaterDepth;

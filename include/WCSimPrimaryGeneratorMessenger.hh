@@ -57,12 +57,18 @@ class WCSimPrimaryGeneratorMessenger: public G4UImessenger
   // IBD event generator spectrum file
   G4UIcmdWithAString* ibdDatabaseCmd;
   G4UIcmdWithAString* ibdmodelCmd;
+
+  // HepMC3 event generator
+  G4UIcmdWithAString *hepmc3fileNameCmd;
+  G4UIcmdWithABool *hepmc3positionGenModeCmd;
   
   // commands for the light injectors (profile from db)
   G4UIcmdWithAString* lightInjectorCmd;
   G4UIcmdWithAString* lightInjectorIdxCmd;
   G4UIcmdWithAnInteger* lightInjectorNPhotonsCmd;
   G4UIcmdWithAString* lightInjectorFilenameCmd;
+  G4UIcmdWithAString* lightInjectorDetailsCmd;
+  G4UIcmdWithAString* lightInjectorDetectorCmd;
   G4UIcmdWithAnInteger* lightInjectorModeCmd;
   
   void IsotopeCommand(G4String newValue);
