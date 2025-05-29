@@ -21,6 +21,10 @@
 #include <sstream>
 #include <iomanip>
 
+#include <fstream>
+#include <vector>
+#include <string>
+
 
 using std::setw;
 // These routines are object registration routines that you can pass
@@ -93,6 +97,8 @@ void WCSimDetectorConstruction::GetWCGeom
       //      G4cout << "determine height: " << zmin << "  " << zmax << " " << aPV->GetName()<<" " << z  << G4endl;
   } 
 }
+
+
 
 void WCSimDetectorConstruction::DescribeAndRegisterPMT(G4VPhysicalVolume* aPV ,int aDepth, int replicaNo,
                                                        const G4Transform3D& aTransform) 
@@ -214,6 +220,387 @@ void WCSimDetectorConstruction::DescribeAndRegisterPMT(G4VPhysicalVolume* aPV ,i
 }
 
 // Utilities to do stuff with the info we have found.
+
+
+std::vector< std::vector<int> > ObtainSTLFacets(const G4Polyhedron& obj){
+    std::vector<std::vector<int>> data;
+
+    G4int iFace;
+    G4int n; 
+    G4int iNodes[100];
+    G4int edgeFlags[100];
+    G4int iFaces[100];
+    
+    for (iFace = 0; iFace < obj.GetNoFacets(); iFace++) {
+        obj.GetFacet(iFace+1, n, iNodes, edgeFlags, iFaces);
+        std::vector<int> temp;
+        if (n == 4){
+            temp.push_back(iFaces[0] - 1);
+            temp.push_back(edgeFlags[0]-1);
+            temp.push_back(iNodes[0] - 1);
+            temp.push_back(iNodes[1] - 1);
+            temp.push_back(iNodes[2] - 1);
+            temp.push_back(iNodes[3] - 1);        
+        } else {
+            temp.push_back(iFaces[0] - 1);
+            temp.push_back(edgeFlags[0]-1);
+            temp.push_back(iNodes[0] - 1);
+            temp.push_back(iNodes[1] - 1);
+            temp.push_back(iNodes[2] - 1);
+            temp.push_back(iNodes[0] - 1); 
+        }
+        data.push_back(temp);
+    }    
+    return data;
+}
+
+
+void ExportToPLY(const std::string& filename,
+                 const std::vector<std::vector<double>>& trans_vertices,
+                 const std::vector<std::vector<int>>& trans_facets)
+{
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        std::cerr << "Could not open file for writing: " << filename << std::endl;
+        return;
+    }
+
+    size_t num_vertices = trans_vertices.size();
+    size_t num_faces = trans_facets.size();
+
+    out << "ply\n";
+    out << "format ascii 1.0\n";
+    out << "element vertex " << num_vertices << "\n";
+    out << "property float x\n";
+    out << "property float y\n";
+    out << "property float z\n";
+    out << "element face " << num_faces << "\n";
+    out << "property list uchar int vertex_index\n";
+    out << "end_header\n";
+
+    // Write vertices
+    for (const auto& v : trans_vertices) {
+        out << v[0] << " " << v[1] << " " << v[2] << "\n";
+    }
+
+    // Write faces (triangles)
+    for (const auto& f : trans_facets) {
+        out << "3 " << static_cast<int>(f[0]) << " " << static_cast<int>(f[1]) << " " << static_cast<int>(f[2]) << "\n";
+    }
+
+    out.close();
+    std::cout << "PLY export complete: " << filename << std::endl;
+}
+
+
+
+
+
+#include <fstream>
+#include <vector>
+#include <string>
+#include <iostream>
+
+void ExportToOBJ_Append(const std::string& filename,
+                        const std::vector<std::vector<double>>& vertices,
+                        const std::vector<std::vector<int>>& faces,
+                        const std::string& object_name,
+                        size_t& global_vertex_offset)
+{
+    std::ofstream out(filename, std::ios::app);  // append mode
+    if (!out.is_open()) {
+        std::cerr << "Failed to open OBJ file for appending: " << filename << std::endl;
+        return;
+    }
+
+    // Write object name
+    out << "o " << object_name << "\n";
+
+    // Write vertices
+    for (const auto& v : vertices) {
+        out << "v " << v[0] << " " << v[1] << " " << v[2] << "\n";
+    }
+
+    // Write faces with correct global offset
+    for (const auto& f : faces) {
+        out << "f "
+            << (f[0] + global_vertex_offset) << " "
+            << (f[1] + global_vertex_offset) << " "
+            << (f[2] + global_vertex_offset) << "\n";
+    }
+
+    // Update the global offset for the next object
+    global_vertex_offset += vertices.size();
+
+    out.close();
+}
+
+
+// void ExportToOBJ(const std::string& filename,
+//                  const std::vector<std::vector<std::vector<double>>>& all_vertices,
+//                  const std::vector<std::vector<std::vector<double>>>& all_faces,
+//                  const std::vector<std::string>& object_names = {})
+// {
+//     std::ofstream out(filename);
+//     if (!out.is_open()) {
+//         std::cerr << "Failed to open OBJ file for writing: " << filename << std::endl;
+//         return;
+//     }
+
+//     size_t global_vertex_offset = 1;  // OBJ indices are 1-based
+
+//     for (size_t obj_idx = 0; obj_idx < all_vertices.size(); ++obj_idx) {
+//         const auto& vertices = all_vertices[obj_idx];
+//         const auto& faces = all_faces[obj_idx];
+//         std::string obj_name = (object_names.size() > obj_idx) ? object_names[obj_idx] : "Object" + std::to_string(obj_idx);
+
+//         // Write object name
+//         out << "o " << obj_name << "\n";
+
+//         // Write vertices
+//         for (const auto& v : vertices) {
+//             out << "v " << v[0] << " " << v[1] << " " << v[2] << "\n";
+//         }
+
+//         // Write faces (add offset to local indices)
+//         for (const auto& f : faces) {
+//             out << "f " 
+//                 << (f[0] + global_vertex_offset) << " "
+//                 << (f[1] + global_vertex_offset) << " "
+//                 << (f[2] + global_vertex_offset) << "\n";
+//         }
+
+//         global_vertex_offset += vertices.size();
+//     }
+
+//     out.close();
+//     std::cout << "OBJ export complete: " << filename << std::endl;
+// }
+
+
+void WCSimDetectorConstruction::BuildSTLModel(G4VPhysicalVolume* aPV ,int aDepth, int replicaNo,
+                                                       const G4Transform3D& aTransform) 
+{
+  if (aDepth != 5) return;
+  // if (global_obj_size > 40000) return;
+
+  static std::string replicaNoString[20];
+
+  std::stringstream depth;
+  std::stringstream pvname;
+  std::stringsstream filename_in;
+  filename_in << "plylayer_" << aDepth;
+  
+
+  depth << replicaNo << "-" << aDepth;
+  pvname << aPV->GetName();
+  
+  if (std::find(global_obj_size.begin(), global_obj_size.end(), aDepth) == global_obj_size.end()){
+    global_obj_size[aDepth] = 1;
+  }
+  
+
+ // Check material outer is water, if so skip it.
+  replicaNoString[aDepth] = pvname.str() + "-" + depth.str();
+
+  auto poly = aPV->GetLogicalVolume()->GetSolid()->CreatePolyhedron();
+
+  std::vector< std::vector<double> > vertices;
+  for (int i = 0; i < poly->GetNoVertices(); i++){
+    auto v = poly->GetVertex(i+1);
+    vertices.push_back( {v[0], v[1], v[2]} );
+  }
+  
+  auto facets = ObtainSTLFacets(*poly);
+
+  // std::vector< std::vector<double> > normals;
+  // for (int i = 0; i < poly->GetNoFacets(); i++){
+  //   auto v = poly->GetUnitNormal(i+1);
+  //   normals.push_back( {v[0], v[1], v[2]} );
+  // }
+  
+  std::vector< std::vector<double> > trans_vertices;
+  for (auto const v : vertices){
+    auto p = G4ThreeVector(v[0], v[1], v[2]);
+    p = aTransform.getRotation()*p + aTransform.getTranslation();
+    trans_vertices.push_back( {p[0], p[1], p[2]} );
+  }
+
+  // std::vector< std::vector<double> > trans_normals;
+  // for (auto const n : normals){
+  //   auto p = G4ThreeVector(n[0], n[1], n[2]);
+  //   p = aTransform.getRotation()*p;
+  //   trans_normals.push_back( {p[0], p[1], p[2]} );
+  // }
+
+  std::vector< std::vector<int> > trans_facets;
+  for (auto const f : facets){
+    std::vector<int> ff = {f[2], f[3], f[4], f[5]};
+
+    trans_facets.push_back(std::vector<int>({ff[0], ff[1], ff[2]}));
+    trans_facets.push_back(std::vector<int>({ff[0], ff[1], ff[3]}));
+    trans_facets.push_back(std::vector<int>({ff[0], ff[2], ff[1]}));
+    trans_facets.push_back(std::vector<int>({ff[0], ff[2], ff[3]}));
+    trans_facets.push_back(std::vector<int>({ff[0], ff[3], ff[2]}));
+    trans_facets.push_back(std::vector<int>({ff[0], ff[3], ff[3]}));
+
+    trans_facets.push_back(std::vector<int>({ff[1], ff[0], ff[2]}));
+    trans_facets.push_back(std::vector<int>({ff[1], ff[0], ff[3]}));
+    trans_facets.push_back(std::vector<int>({ff[1], ff[2], ff[0]}));
+    trans_facets.push_back(std::vector<int>({ff[1], ff[2], ff[3]}));
+    trans_facets.push_back(std::vector<int>({ff[1], ff[3], ff[0]}));
+    trans_facets.push_back(std::vector<int>({ff[1], ff[3], ff[3]}));
+
+    trans_facets.push_back(std::vector<int>({ff[2], ff[0], ff[1]}));
+    trans_facets.push_back(std::vector<int>({ff[2], ff[0], ff[3]}));
+    trans_facets.push_back(std::vector<int>({ff[2], ff[1], ff[0]}));
+    trans_facets.push_back(std::vector<int>({ff[2], ff[1], ff[3]}));
+    trans_facets.push_back(std::vector<int>({ff[2], ff[3], ff[0]}));
+    trans_facets.push_back(std::vector<int>({ff[2], ff[3], ff[1]}));
+  }
+
+  std::map<int, int> local_global_vertex_map;
+
+  std::vector< std::vector<double> > group_vertices;
+  for (int i = 0; i < trans_vertices.size(); i++){
+    int local_id = i;
+    int global_id = i; //global_vertices.size();
+    local_global_vertex_map[local_id] = global_id;
+    // global_vertices.push_back( trans_vertices[i] );
+    group_vertices.push_back( trans_vertices[i] );
+  }    
+
+  std::vector< std::vector<int> > group_facets;
+
+  for (int i = 0; i < trans_facets.size(); i++){
+
+    auto f_local = trans_facets[i];
+    std::vector<int> f_global;
+    f_global.push_back(local_global_vertex_map[f_local[0]]);
+    f_global.push_back(local_global_vertex_map[f_local[1]]);
+    f_global.push_back(local_global_vertex_map[f_local[2]]);
+    // global_facets.push_back( f_global );
+    group_facets.push_back( f_global );
+
+  }
+
+  std::cout << "FACET SIZE : " << aDepth << " " << global_obj_size[aDepth] << std::endl;
+
+  ExportToOBJ_Append(filename_in.str(), group_vertices, group_facets, replicaNoString[aDepth], global_obj_size[aDepth]);     
+
+}
+
+void WCSimDetectorConstruction::DumpSTLToFile(){
+  // ExportToPLY("test.ply", global_vertices, global_facets);
+  
+}
+
+
+
+
+// void WCSimDetectorConstruction::BuildSTLModel(G4VPhysicalVolume* aPV ,int aDepth, int replicaNo,
+//                                                        const G4Transform3D& aTransform) 
+// {
+//   if (replicaNo > 1) return;
+//   if (global_facets.size() > 400000000) return;
+
+//   static std::string replicaNoString[20];
+
+//   std::stringstream depth;
+//   std::stringstream pvname;
+
+//   depth << replicaNo;
+//   pvname << aPV->GetName();
+
+
+//   replicaNoString[aDepth] = pvname.str() + "-" + depth.str();
+
+//   auto poly = aPV->GetLogicalVolume()->GetSolid()->CreatePolyhedron();
+
+//   std::vector< std::vector<double> > vertices;
+//   for (int i = 0; i < poly->GetNoVertices(); i++){
+//     auto v = poly->GetVertex(i+1);
+//     vertices.push_back( {v[0], v[1], v[2]} );
+//   }
+  
+//   auto facets = ObtainSTLFacets(*poly);
+
+//   // std::vector< std::vector<double> > normals;
+//   // for (int i = 0; i < poly->GetNoFacets(); i++){
+//   //   auto v = poly->GetUnitNormal(i+1);
+//   //   normals.push_back( {v[0], v[1], v[2]} );
+//   // }
+  
+//   std::vector< std::vector<double> > trans_vertices;
+//   for (auto const v : vertices){
+//     auto p = G4ThreeVector(v[0], v[1], v[2]);
+//     p = aTransform.getRotation()*p + aTransform.getTranslation();
+//     trans_vertices.push_back( {p[0], p[1], p[2]} );
+//   }
+
+//   // std::vector< std::vector<double> > trans_normals;
+//   // for (auto const n : normals){
+//   //   auto p = G4ThreeVector(n[0], n[1], n[2]);
+//   //   p = aTransform.getRotation()*p;
+//   //   trans_normals.push_back( {p[0], p[1], p[2]} );
+//   // }
+
+//   std::vector< std::vector<int> > trans_facets;
+//   for (auto const f : facets){
+//     std::vector<int> ff = {f[2], f[3], f[4], f[5]};
+
+//     trans_facets.push_back(std::vector<int>({ff[0], ff[1], ff[2]}));
+//     trans_facets.push_back(std::vector<int>({ff[0], ff[1], ff[3]}));
+//     trans_facets.push_back(std::vector<int>({ff[0], ff[2], ff[1]}));
+//     trans_facets.push_back(std::vector<int>({ff[0], ff[2], ff[3]}));
+//     trans_facets.push_back(std::vector<int>({ff[0], ff[3], ff[2]}));
+//     trans_facets.push_back(std::vector<int>({ff[0], ff[3], ff[3]}));
+
+//     trans_facets.push_back(std::vector<int>({ff[1], ff[0], ff[2]}));
+//     trans_facets.push_back(std::vector<int>({ff[1], ff[0], ff[3]}));
+//     trans_facets.push_back(std::vector<int>({ff[1], ff[2], ff[0]}));
+//     trans_facets.push_back(std::vector<int>({ff[1], ff[2], ff[3]}));
+//     trans_facets.push_back(std::vector<int>({ff[1], ff[3], ff[0]}));
+//     trans_facets.push_back(std::vector<int>({ff[1], ff[3], ff[3]}));
+
+//     trans_facets.push_back(std::vector<int>({ff[2], ff[0], ff[1]}));
+//     trans_facets.push_back(std::vector<int>({ff[2], ff[0], ff[3]}));
+//     trans_facets.push_back(std::vector<int>({ff[2], ff[1], ff[0]}));
+//     trans_facets.push_back(std::vector<int>({ff[2], ff[1], ff[3]}));
+//     trans_facets.push_back(std::vector<int>({ff[2], ff[3], ff[0]}));
+//     trans_facets.push_back(std::vector<int>({ff[2], ff[3], ff[1]}));
+//   }
+
+//   std::map<int, int> local_global_vertex_map;
+//   for (int i = 0; i < trans_vertices.size(); i++){
+//     int local_id = i;
+//     int global_id = global_vertices.size();
+//     local_global_vertex_map[local_id] = global_id;
+//     global_vertices.push_back( trans_vertices[i] );
+//   }    
+
+//   for (int i = 0; i < trans_facets.size(); i++){
+
+//     auto f_local = trans_facets[i];
+//     std::vector<int> f_global;
+//     f_global.push_back(local_global_vertex_map[f_local[0]]);
+//     f_global.push_back(local_global_vertex_map[f_local[1]]);
+//     f_global.push_back(local_global_vertex_map[f_local[2]]);
+//     global_facets.push_back( f_global );
+
+//   }
+
+//   std::cout << "FACET SIZE : " << global_facets.size() << std::endl;
+
+                
+  
+// }
+
+// void WCSimDetectorConstruction::DumpSTLToFile(){
+//   ExportToPLY("test.ply", global_vertices, global_facets);
+  
+// }
+
 
 // Output to WC geometry text file
 void WCSimDetectorConstruction::DumpGeometryTableToFile()

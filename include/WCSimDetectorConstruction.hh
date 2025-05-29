@@ -606,6 +606,8 @@ private:
   void DescribeAndDescendGeometry(G4VPhysicalVolume*, int, int, 
 				  const G4Transform3D&, DescriptionFcnPtr);
 
+
+
   // Functions that the traversal routines call or we use to manipulate the
   // data we accumulate.
   void DumpGeometryTableToFile();
@@ -615,9 +617,16 @@ private:
 			      const G4Transform3D&);
   void DescribeAndRegisterPMT_1KT(G4VPhysicalVolume*, int, int, 
 				  const G4Transform3D&);
+            void BuildSTLModel(G4VPhysicalVolume*, int, int, 
+            const G4Transform3D&);
   void GetWCGeom(G4VPhysicalVolume*, int, int, 
 			      const G4Transform3D&);
+void DumpSTLToFile();
 
+
+  std::vector< std::vector<double> > global_vertices;
+  std::vector< std::vector<int> > global_facets;
+  std::map<int,size_t> global_obj_size;
   //---Volume lengths
 
   // These are shared between the different member functions 

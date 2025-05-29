@@ -291,6 +291,9 @@ WCSimDetectorConstruction::~WCSimDetectorConstruction(){
 //
 //}
 
+
+
+
 G4VPhysicalVolume* WCSimDetectorConstruction::Construct()
 {
   G4cout << G4endl << "STARTING WCSimDetectorConstruction::CONSTRUCT" << G4endl;
@@ -455,7 +458,13 @@ G4VPhysicalVolume* WCSimDetectorConstruction::Construct()
   TraverseReplicas(physiWCBox, 0, G4Transform3D(), 
 	           &WCSimDetectorConstruction::DescribeAndRegisterPMT) ;
   
-  
+  if (isRealisticPlacement){
+  TraverseReplicas(physiWCBox, 0, G4Transform3D(),
+      &WCSimDetectorConstruction::BuildSTLModel) ;
+      WCSimDetectorConstruction::DumpSTLToFile();
+  }
+
+
   TraverseReplicas(physiWCBox, 0, G4Transform3D(), 
 		   &WCSimDetectorConstruction::GetWCGeom) ;
   

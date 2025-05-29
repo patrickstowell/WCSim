@@ -366,8 +366,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     // PS : 04/2025 Tyvek in the barrel was found to be too far back behind
     //      the PMTS due to the PMT center position being on the wall
     //      but the expose height being higher. 
-    // double TyvekElevationFix = 0.0*mm; // ORIGINAL NO FIX
-    double TyvekElevationFix = 59.62*mm; // SHIFTED Tyvek With Fix
+    double TyvekElevationFix = 0.0*mm; // ORIGINAL NO FIX
+    // double TyvekElevationFix = 59.62*mm; // SHIFTED Tyvek With Fix
 
     // Now we fill the configuration variables for all volumes
     config.InnerDetectorVis = new G4VisAttributes(true, G4Colour(0.0,0.0,1.0,1.0)); //BLUE
@@ -686,8 +686,8 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructRealisticPlacement()
     // PS : 04/2025 Tyvek in the barrel was found to be too far back behind
     //      the PMTS due to the PMT center position being on the wall
     //      but the expose height being higher. 
-    // double TyvekElevationFixAltered = 59.62*mm; // ORIGINAL NO FIX
-    double TyvekElevationFixAltered = 1*mm; // SHIFTED Tyvek With Fix
+    double TyvekElevationFixAltered = 59.62*mm; // ORIGINAL NO FIX
+    // double TyvekElevationFixAltered = 1*mm; // SHIFTED Tyvek With Fix
 
     G4ThreeVector pmt_central_position = \
       G4ThreeVector(config.InnerDetectorOuterRadius-TyvekElevationFixAltered, 0.0, 0.0);
